@@ -1,20 +1,20 @@
-# chatbot-qq v0.2.5｜backup health checks
+# chatbot-qq v0.2.6｜operations health report
 
-This release makes local server backups directly verifiable instead of only producing archives.
+This release adds a single JSON report command for daily operations checks and future alerting.
 
-中文关键词：QQ 机器人备份、备份校验、SHA256、Windows 计划任务、本地巡检、cc-connect QQ。
+中文关键词：QQ 机器人巡检、运维报告、JSON 健康检查、metrics、备份状态、cc-connect QQ。
 
 ## Highlights
 
-- Adds `scripts/check-backup-status.ps1`.
-- Validates latest backup age, archive existence, byte count, SHA256, and scheduled task state.
-- Integrates backup health checks into `scripts/check-napcat-server.ps1`.
-- Documents the backup check command in server deployment notes.
+- Adds `scripts/get-chatbot-qq-health-report.ps1`.
+- Summarizes server service states, timers, `/healthz`, `/metrics`, recent integrity/cleanup logs, and local backup health.
+- Exits non-zero when the report is unhealthy, so it can be used from scheduled tasks or external monitors.
+- Documents the report command in server deployment notes.
 
 ## Verify
 
 ```powershell
-.\scripts\check-backup-status.ps1
+.\scripts\get-chatbot-qq-health-report.ps1
 $env:GOPROXY="https://goproxy.cn,direct"
 npm test
 git diff --check
@@ -22,15 +22,14 @@ git diff --check
 
 Expected:
 
-- Backup status reports `OK` when the latest archive is fresh and matches `LATEST.json`.
+- The report JSON contains `"ok": true` when server services, proxy health, metrics, and backup status are healthy.
 - Go package checks pass when dependencies are reachable.
 - Node and PowerShell checks pass.
 - Sensitive local-data scan passes.
 
 ## Deployment Notes
 
-- `check-backup-status.ps1` defaults to a 30-hour freshness window, suitable for a daily backup task.
-- A task that has not run yet is allowed if the latest manual backup is fresh and valid.
+- The report reads `/metrics` and `/healthz` over localhost on the server.
 - Real server addresses, QQ IDs, and API keys must stay in ignored local files or operator-provided command arguments.
 
 ## Full Changelog

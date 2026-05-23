@@ -7,6 +7,13 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-05-23
+
+### Added
+
+- Added a machine-readable operations report script that summarizes server services, timers, proxy health, metrics preview, recent maintenance logs, and local backup status.
+- Documented the operations report command in server deployment notes.
+
 ## [0.2.5] - 2026-05-23
 
 ### Added
