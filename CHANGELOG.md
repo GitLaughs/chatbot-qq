@@ -7,6 +7,18 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-05-23
+
+### Added
+
+- Added `deploy/linux/wait-onebot-ports.sh` so `cc-connect-qq.service` waits for OneBot proxy ports without inline systemd shell-array expansion.
+- Added optional shell syntax checks to the release test script when a usable Bash is available.
+
+### Fixed
+
+- Fixed repeated `ports[@]` systemd environment-variable warnings during `cc-connect-qq.service` startup.
+- Avoided false shell-check failures on Windows WSL launcher installations that expose `bash.exe` but have no usable Linux environment.
+
 ## [0.2.14] - 2026-05-23
 
 ### Changed

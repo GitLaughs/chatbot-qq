@@ -54,6 +54,7 @@ if [ ! -f /etc/chatbot-qq.env ]; then
   chmod 600 /etc/chatbot-qq.env
 fi
 '$RemoteDir/deploy/linux/chatbot-qq-permission-audit.sh' --fix
+chmod 755 '$RemoteDir/deploy/linux/wait-onebot-ports.sh'
 cd '$RemoteDir'
 if command -v npm >/dev/null 2>&1; then
   npm install --omit=dev

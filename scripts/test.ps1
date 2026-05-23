@@ -44,6 +44,20 @@ foreach ($file in $psFiles) {
   }
 }
 
+Step "Shell syntax checks"
+$bashCommand = Get-Command bash -ErrorAction SilentlyContinue
+if ($bashCommand -and $bashCommand.Source -notmatch "\\Windows\\system32\\bash\.exe$") {
+  $shellFiles = Get-ChildItem -Path deploy -Recurse -Include *.sh -File
+  foreach ($file in $shellFiles) {
+    bash -n $file.FullName
+    if ($LASTEXITCODE -ne 0) {
+      throw "Shell syntax check failed: $($file.FullName)"
+    }
+  }
+} else {
+  Write-Host "SKIP: usable bash not found on PATH"
+}
+
 Step "Sensitive local-data scan"
 $forbidden = @(
   ("110" + "7099585"),

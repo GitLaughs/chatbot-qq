@@ -9,7 +9,7 @@ WorkingDirectory=/opt/chatbot-qq
 EnvironmentFile=-/etc/chatbot-qq.env
 Environment=HOME=/root/.codex-qq-home
 Environment=USER=root
-ExecStartPre=/bin/bash -lc 'IFS=, read -ra ports <<< "${ONEBOT_PROXY_PORTS:-3002,3003,3005,3006,3007,3008,3009}"; for port in "${ports[@]}"; do port="${port//[[:space:]]/}"; [ -z "$port" ] && continue; for i in {1..30}; do timeout 1 bash -c "</dev/tcp/127.0.0.1/$port" >/dev/null 2>&1 && break; sleep 1; done; timeout 1 bash -c "</dev/tcp/127.0.0.1/$port" >/dev/null 2>&1; done'
+ExecStartPre=/bin/bash /opt/chatbot-qq/deploy/linux/wait-onebot-ports.sh
 ExecStart=/usr/bin/env cc-connect --config /root/.cc-connect-qq/config.toml --force
 Restart=always
 RestartSec=10
