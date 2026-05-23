@@ -37,9 +37,4 @@ tail -n 20 /var/log/chatbot-qq-cleanup.log 2>/dev/null || true
 
 Write-Host
 Write-Host "== Local backup status =="
-$latest = Join-Path $LocalBackupDir "LATEST.json"
-if (Test-Path $latest) {
-    Get-Content -Raw -Path $latest
-} else {
-    Write-Host "No LATEST.json found under $LocalBackupDir"
-}
+& (Join-Path $PSScriptRoot "check-backup-status.ps1") -LocalBackupDir $LocalBackupDir

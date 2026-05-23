@@ -1,37 +1,37 @@
-# chatbot-qq v0.2.4｜metrics and backup status
+# chatbot-qq v0.2.5｜backup health checks
 
-This release adds lightweight operational visibility for the QQ proxy and local server backups.
+This release makes local server backups directly verifiable instead of only producing archives.
 
-中文关键词：QQ 机器人监控、Prometheus metrics、健康检查、本地自动备份、Linux 清理任务、cc-connect QQ。
+中文关键词：QQ 机器人备份、备份校验、SHA256、Windows 计划任务、本地巡检、cc-connect QQ。
 
 ## Highlights
 
-- Adds `/metrics` next to `/healthz` and `/readyz` for Prometheus-style counters.
-- Exposes upstream readiness, port connectivity, pending queues, file archive counters, listen queues, and image job counters.
-- Writes `LATEST.json` after each local server backup with archive path, size, timestamp, server, and SHA256.
-- Shows local backup status from `scripts/check-napcat-server.ps1`.
-- Limits cleanup log pruning to top-level QQ log files under `/var/log`, avoiding unrelated system log directory permission noise.
+- Adds `scripts/check-backup-status.ps1`.
+- Validates latest backup age, archive existence, byte count, SHA256, and scheduled task state.
+- Integrates backup health checks into `scripts/check-napcat-server.ps1`.
+- Documents the backup check command in server deployment notes.
 
 ## Verify
 
 ```powershell
+.\scripts\check-backup-status.ps1
 $env:GOPROXY="https://goproxy.cn,direct"
 npm test
 git diff --check
 ```
 
-Runtime checks:
+Expected:
 
-```bash
-curl -fsS http://127.0.0.1:3010/metrics
-curl -fsS http://127.0.0.1:3010/healthz
-```
+- Backup status reports `OK` when the latest archive is fresh and matches `LATEST.json`.
+- Go package checks pass when dependencies are reachable.
+- Node and PowerShell checks pass.
+- Sensitive local-data scan passes.
 
 ## Deployment Notes
 
-- `/metrics` is bound to the same local health host as `/healthz`; keep it on localhost unless you intentionally front it with an authenticated monitor.
-- Backup status is written beside backup archives as `LATEST.json`.
-- Real QQ group IDs, private user IDs, API keys, and NapCat tokens must stay in ignored local files or `/etc/chatbot-qq.env`.
+- `check-backup-status.ps1` defaults to a 30-hour freshness window, suitable for a daily backup task.
+- A task that has not run yet is allowed if the latest manual backup is fresh and valid.
+- Real server addresses, QQ IDs, and API keys must stay in ignored local files or operator-provided command arguments.
 
 ## Full Changelog
 

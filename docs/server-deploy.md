@@ -142,6 +142,12 @@ Manual backup:
 .\scripts\backup-chatbot-qq-server.ps1
 ```
 
+Check backup freshness, archive existence, byte count, SHA256, and the Windows scheduled task:
+
+```powershell
+.\scripts\check-backup-status.ps1
+```
+
 By default this backs up group/user workspaces and cc-connect runtime data, but skips `/etc/chatbot-qq.env` so API keys are not copied casually. Add `-IncludeSecrets` only when making an encrypted/offline key backup.
 
 Restore a backup to the server:

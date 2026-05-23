@@ -7,6 +7,17 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-05-23
+
+### Added
+
+- Added a local backup health checker that validates backup freshness, archive existence, byte count, SHA256, and Windows scheduled task state.
+- Documented the backup health check in server deployment notes.
+
+### Changed
+
+- Updated server checks to run the backup health checker instead of only printing raw backup status JSON.
+
 ## [0.2.4] - 2026-05-23
 
 ### Added
