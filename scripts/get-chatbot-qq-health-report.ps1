@@ -1,11 +1,26 @@
 param(
     [string]$Server = "root@203.0.113.10",
     [string]$LocalBackupDir = "E:\CHATBOT-QQ\backup\server-daily",
+    [string]$OutputDir = "E:\CHATBOT-QQ\backup\health-reports",
     [int]$BackupMaxAgeHours = 30,
+    [int]$KeepDays = 14,
+    [switch]$InstallScheduledTask,
+    [switch]$IncludeSensitive,
     [switch]$NoExit
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($InstallScheduledTask) {
+    $script = Join-Path (Split-Path -Parent $PSScriptRoot) "scripts\get-chatbot-qq-health-report.ps1"
+    $args = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -Server `"$Server`" -LocalBackupDir `"$LocalBackupDir`" -OutputDir `"$OutputDir`" -BackupMaxAgeHours $BackupMaxAgeHours -KeepDays $KeepDays"
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $args
+    $trigger = New-ScheduledTaskTrigger -Daily -At 4:00am
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+    Register-ScheduledTask -TaskName "CHATBOT-QQ daily health report" -Action $action -Trigger $trigger -Settings $settings -Description "Generate a JSON operations health report for CHATBOT-QQ every day." -Force | Out-Null
+    Write-Host "Scheduled task installed: CHATBOT-QQ daily health report"
+    return
+}
 
 function Invoke-RemoteText($Command) {
     $output = ssh $Server $Command 2>&1
@@ -83,6 +98,55 @@ function Test-BackupStatus {
     return $result
 }
 
+function Mask-SensitiveValue($Value) {
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [string]) {
+        return $Value -replace '\b\d{6,12}\b', { param($m) Mask-Id $m.Value }
+    }
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double]) {
+        $text = [string]$Value
+        if ($text -match '^\d{6,12}$') {
+            return Mask-Id $text
+        }
+        return $Value
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $copy = [ordered]@{}
+        foreach ($key in $Value.Keys) {
+            $copy[$key] = Mask-SensitiveValue $Value[$key]
+        }
+        return $copy
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        $items = @()
+        foreach ($item in $Value) {
+            $items += Mask-SensitiveValue $item
+        }
+        return $items
+    }
+    if ($Value.PSObject -and $Value.PSObject.Properties.Count -gt 0) {
+        $copy = [ordered]@{}
+        foreach ($prop in $Value.PSObject.Properties) {
+            $copy[$prop.Name] = Mask-SensitiveValue $prop.Value
+        }
+        return $copy
+    }
+    return $Value
+}
+
+function Mask-Id($Text) {
+    if ($Text.Length -le 5) {
+        return $Text
+    }
+    return "$($Text.Substring(0, 2))***$($Text.Substring($Text.Length - 2))"
+}
+
+function Mask-Text($Text) {
+    return [regex]::Replace([string]$Text, '\b\d{6,12}\b', { param($m) Mask-Id $m.Value })
+}
+
 $report = [ordered]@{
     time = (Get-Date).ToString("o")
     server = $Server
@@ -147,7 +211,36 @@ if (-not $backup.ok) {
 
 $report.ok = $failures.Count -eq 0
 $report.failures = @($failures)
-$report | ConvertTo-Json -Depth 12
+if (-not $IncludeSensitive) {
+    if ($report.proxy.health) {
+        $report.proxy.health.allowed_groups = @($report.proxy.health.allowed_groups | ForEach-Object { Mask-Id ([string]$_) })
+        $report.proxy.health.allowed_private_users = @($report.proxy.health.allowed_private_users | ForEach-Object { Mask-Id ([string]$_) })
+        $report.proxy.health.quiet_groups = [ordered]@{}
+    }
+    if ($report.logs) {
+        $report.logs.integrity_tail = @($report.logs.integrity_tail | ForEach-Object { Mask-Text $_ })
+        $report.logs.cleanup_tail = @($report.logs.cleanup_tail | ForEach-Object { Mask-Text $_ })
+    }
+    if ($report.backup) {
+        $report.backup.server = Mask-Text $report.backup.server
+        $report.backup.archive = Mask-Text $report.backup.archive
+    }
+}
+$json = $report | ConvertTo-Json -Depth 12
+
+if ($OutputDir) {
+    New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $reportPath = Join-Path $OutputDir "chatbot-qq-health-$stamp.json"
+    $latestPath = Join-Path $OutputDir "LATEST.json"
+    $json | Set-Content -Path $reportPath -Encoding UTF8
+    $json | Set-Content -Path $latestPath -Encoding UTF8
+    Get-ChildItem -Path $OutputDir -Filter "chatbot-qq-health-*.json" |
+        Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
+        Remove-Item -Force
+}
+
+$json
 
 if (-not $report.ok -and -not $NoExit) {
     exit 1

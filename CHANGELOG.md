@@ -7,6 +7,18 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-05-23
+
+### Added
+
+- Added scheduled daily health report installation and retention support.
+- Added health report JSON output files with `LATEST.json` for the latest report.
+
+### Changed
+
+- Redacted QQ numeric identifiers from health report output by default.
+- Updated server checks to summarize the latest health report instead of printing the full JSON by default.
+
 ## [0.2.6] - 2026-05-23
 
 ### Added

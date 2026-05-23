@@ -1,19 +1,21 @@
-# chatbot-qq v0.2.6｜operations health report
+# chatbot-qq v0.2.7｜scheduled health reports
 
-This release adds a single JSON report command for daily operations checks and future alerting.
+This release turns the operations health report into a daily local artifact and makes the default report safer to share.
 
-中文关键词：QQ 机器人巡检、运维报告、JSON 健康检查、metrics、备份状态、cc-connect QQ。
+中文关键词：QQ 机器人巡检、每日健康报告、Windows 计划任务、脱敏报告、LATEST.json、cc-connect QQ。
 
 ## Highlights
 
-- Adds `scripts/get-chatbot-qq-health-report.ps1`.
-- Summarizes server service states, timers, `/healthz`, `/metrics`, recent integrity/cleanup logs, and local backup health.
-- Exits non-zero when the report is unhealthy, so it can be used from scheduled tasks or external monitors.
-- Documents the report command in server deployment notes.
+- Adds `-InstallScheduledTask` to `scripts/get-chatbot-qq-health-report.ps1`.
+- Writes health reports to `backup/health-reports` with a `LATEST.json` pointer.
+- Retains health report history with a configurable keep-days window.
+- Redacts QQ numeric identifiers from health report output by default.
+- Updates the server check script to print a compact latest-health-report summary by default.
 
 ## Verify
 
 ```powershell
+.\scripts\get-chatbot-qq-health-report.ps1 -InstallScheduledTask
 .\scripts\get-chatbot-qq-health-report.ps1
 $env:GOPROXY="https://goproxy.cn,direct"
 npm test
@@ -22,15 +24,15 @@ git diff --check
 
 Expected:
 
-- The report JSON contains `"ok": true` when server services, proxy health, metrics, and backup status are healthy.
-- Go package checks pass when dependencies are reachable.
-- Node and PowerShell checks pass.
-- Sensitive local-data scan passes.
+- The scheduled task `CHATBOT-QQ daily health report` is installed.
+- `backup/health-reports/LATEST.json` is created.
+- The report JSON contains `"ok": true` when services, proxy health, metrics, and backup status are healthy.
+- Sensitive numeric QQ identifiers are redacted unless `-IncludeSensitive` is explicitly used.
 
 ## Deployment Notes
 
-- The report reads `/metrics` and `/healthz` over localhost on the server.
-- Real server addresses, QQ IDs, and API keys must stay in ignored local files or operator-provided command arguments.
+- The default scheduled time is 04:00, after the default 03:40 backup task.
+- Keep raw sensitive operational data in ignored local files only.
 
 ## Full Changelog
 

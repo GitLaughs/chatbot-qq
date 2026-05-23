@@ -38,3 +38,20 @@ tail -n 20 /var/log/chatbot-qq-cleanup.log 2>/dev/null || true
 Write-Host
 Write-Host "== Local backup status =="
 & (Join-Path $PSScriptRoot "check-backup-status.ps1") -LocalBackupDir $LocalBackupDir
+
+Write-Host
+Write-Host "== Latest health report =="
+$healthLatest = Join-Path (Split-Path -Parent $LocalBackupDir) "health-reports\LATEST.json"
+if (Test-Path $healthLatest) {
+    $health = Get-Content -Raw -Path $healthLatest | ConvertFrom-Json
+    [ordered]@{
+        ok = $health.ok
+        time = $health.time
+        server = $health.server
+        failures = $health.failures
+        backup_ok = $health.backup.ok
+        proxy_ok = $health.proxy.health.ok
+    } | ConvertTo-Json -Depth 6
+} else {
+    Write-Host "No health report found under $(Split-Path -Parent $healthLatest)"
+}

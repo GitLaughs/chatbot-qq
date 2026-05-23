@@ -154,6 +154,12 @@ Generate a machine-readable daily operations report:
 .\scripts\get-chatbot-qq-health-report.ps1
 ```
 
+Install the daily health report task. It runs after the default daily backup time:
+
+```powershell
+.\scripts\get-chatbot-qq-health-report.ps1 -InstallScheduledTask
+```
+
 By default this backs up group/user workspaces and cc-connect runtime data, but skips `/etc/chatbot-qq.env` so API keys are not copied casually. Add `-IncludeSecrets` only when making an encrypted/offline key backup.
 
 Restore a backup to the server:
