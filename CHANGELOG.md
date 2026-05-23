@@ -7,6 +7,20 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-05-23
+
+### Changed
+
+- Relaxed the default group reply policy so normal study, work, career, coding, lifestyle, entertainment, file-analysis, and comparison questions are answered directly.
+- Kept refusal boundaries focused on political/sensitive public-affairs requests, prompt injection or instruction extraction, credential/privacy extraction, and bot/system damage attempts.
+- Moved proxy state loading behind the main process entrypoint so unit tests can import proxy helpers without touching runtime state.
+
+### Fixed
+
+- Fixed QQ answer-image triggering for LaTeX display and inline delimiters such as `\[` `\]` and `\(` `\)`.
+- Stripped those LaTeX delimiters from QQ text fallback rendering to avoid ugly literal delimiter messages.
+- Added invalid proxy-state quarantine and reset so corrupted JSON is moved aside and replaced with a clean default state instead of repeatedly breaking startup.
+
 ## [0.2.13] - 2026-05-23
 
 ### Added

@@ -116,14 +116,6 @@ const listenModeByGroup = new Map();
 let proxyCommands = null;
 let proxyFiles = null;
 
-loadProxyState({
-  file: PROXY_STATE_FILE,
-  listenModes: listenModeByGroup,
-  quietUntil: quietUntilByGroup,
-  atOnlyGroups: AT_ONLY_GROUPS,
-  log
-});
-
 function log(...args) {
   console.log(new Date().toISOString(), ...args.map(maskSensitive));
 }
@@ -1649,7 +1641,7 @@ function shouldRenderAsImage(text) {
   if (s.length > 900) {
     return true;
   }
-  return /(\$\$?|\\frac|\\sum|\\int|\\sqrt|\\begin\{|[∑√∫≤≥≈≠∞]|[a-zA-Z]\^\{?[-+\w]+\}?|[a-zA-Z]_\{?[-+\w]+\}?)/.test(s);
+  return /(\$\$?|\\\[|\\\]|\\\(|\\\)|\\frac|\\sum|\\int|\\sqrt|\\begin\{|[∑√∫≤≥≈≠∞]|[a-zA-Z]\^\{?[-+\w]+\}?|[a-zA-Z]_\{?[-+\w]+\}?)/.test(s);
 }
 
 function renderAnswerImage(groupID, text) {
@@ -1717,6 +1709,8 @@ function stripWorkspacePath(text) {
 function renderForQQ(text) {
   return String(text || "")
     .replace(/\r\n/g, "\n")
+    .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, "\n$1\n")
+    .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, "$1")
     .replace(/```[a-zA-Z0-9_-]*\n([\s\S]*?)```/g, (_, code) => {
       const body = String(code).trimEnd();
       return body ? `\n代码：\n${body}\n` : "";
@@ -2310,47 +2304,64 @@ function healthSnapshot() {
   });
 }
 
-for (const port of LISTEN_PORTS) {
-  const server = new WebSocket.Server({ host: "127.0.0.1", port });
-  server.on("connection", (ws) => {
-    clients.set(port, ws);
-    log("client connected", port);
+function startProxyServers() {
+  for (const port of LISTEN_PORTS) {
+    const server = new WebSocket.Server({ host: "127.0.0.1", port });
+    server.on("connection", (ws) => {
+      clients.set(port, ws);
+      log("client connected", port);
 
-    ws.on("message", (data) => {
-      try {
-        let obj = JSON.parse(data.toString());
-        if (shouldSilenceOutgoing(obj)) {
-          log("silence outgoing status", "port", port, "action", obj && obj.action);
-          return;
+      ws.on("message", (data) => {
+        try {
+          let obj = JSON.parse(data.toString());
+          if (shouldSilenceOutgoing(obj)) {
+            log("silence outgoing status", "port", port, "action", obj && obj.action);
+            return;
+          }
+          const groupID = outgoingGroupID(obj);
+          obj = prepareOutgoing(obj, port);
+          obj = trackOutgoingAPI(obj, port);
+          sendUpstream(obj);
+          const route = routeForGroup(groupID);
+          if (port === route.listenPort && isOutgoingMessageAction(obj) && ALLOWED_GROUPS.includes(groupID)) {
+            scheduleListenRelease(groupID, obj.action);
+          }
+        } catch (err) {
+          log("client parse error", err.message);
         }
-        const groupID = outgoingGroupID(obj);
-        obj = prepareOutgoing(obj, port);
-        obj = trackOutgoingAPI(obj, port);
-        sendUpstream(obj);
-        const route = routeForGroup(groupID);
-        if (port === route.listenPort && isOutgoingMessageAction(obj) && ALLOWED_GROUPS.includes(groupID)) {
-          scheduleListenRelease(groupID, obj.action);
-        }
-      } catch (err) {
-        log("client parse error", err.message);
-      }
+      });
+      ws.on("close", () => {
+        clients.delete(port);
+        log("client closed", port);
+      });
+      ws.on("error", (err) => log("client error", port, err.message));
     });
-    ws.on("close", () => {
-      clients.delete(port);
-      log("client closed", port);
-    });
-    ws.on("error", (err) => log("client error", port, err.message));
-  });
 
-  server.on("listening", () => {
-    log("proxy listening", port, "allowed_groups", ALLOWED_GROUPS.join(","), "allowed_private", ALLOWED_PRIVATE_USERS.join(","), "listen_port", LISTEN_PORT, "at_port", AT_PORT);
-  });
+    server.on("listening", () => {
+      log("proxy listening", port, "allowed_groups", ALLOWED_GROUPS.join(","), "allowed_private", ALLOWED_PRIVATE_USERS.join(","), "listen_port", LISTEN_PORT, "at_port", AT_PORT);
+    });
+  }
 }
 
-startHealthServer({
-  host: HEALTH_HOST,
-  port: HEALTH_PORT,
-  snapshot: healthSnapshot,
-  log
-});
-connectUpstream();
+if (require.main === module) {
+  loadProxyState({
+    file: PROXY_STATE_FILE,
+    listenModes: listenModeByGroup,
+    quietUntil: quietUntilByGroup,
+    atOnlyGroups: AT_ONLY_GROUPS,
+    log
+  });
+  startProxyServers();
+  startHealthServer({
+    host: HEALTH_HOST,
+    port: HEALTH_PORT,
+    snapshot: healthSnapshot,
+    log
+  });
+  connectUpstream();
+}
+
+module.exports = {
+  shouldRenderAsImage,
+  renderForQQ
+};

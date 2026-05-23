@@ -30,6 +30,27 @@ function loadProxyState({ file, listenModes, quietUntil, atOnlyGroups, log }) {
     log("proxy state loaded", file);
   } catch (err) {
     log("proxy state load failed", err.message);
+    quarantineInvalidState(file, log);
+  }
+}
+
+function quarantineInvalidState(file, log) {
+  try {
+    if (!fs.existsSync(file)) {
+      return;
+    }
+    const backup = `${file}.invalid-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
+    fs.renameSync(file, backup);
+    ensureDir(path.dirname(file));
+    fs.writeFileSync(file, JSON.stringify({
+      version: 1,
+      updated_at: new Date().toISOString(),
+      listen_modes: {},
+      quiet_until: {}
+    }, null, 2), "utf8");
+    log("proxy state reset invalid file", backup);
+  } catch (resetErr) {
+    log("proxy state reset failed", resetErr.message);
   }
 }
 

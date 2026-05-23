@@ -5,6 +5,8 @@ const path = require("path");
 const { createHealthSnapshot, createMetricsText } = require("./lib/proxy-health");
 const { createProxyCommands } = require("./lib/proxy-commands");
 const { createProxyFiles } = require("./lib/proxy-files");
+const { loadProxyState } = require("./lib/proxy-state");
+const { shouldRenderAsImage, renderForQQ } = require("./onebot-group-proxy");
 
 function testAtOnlyRequiredPorts() {
   const clients = new Map([[3002, {}], [3003, {}], [3005, {}], [3006, {}]]);
@@ -57,6 +59,43 @@ function testMetricsTextIncludesOperationalCounters() {
   assert.match(text, /chatbot_qq_pending_file_downloads 1/);
   assert.match(text, /chatbot_qq_files_group_uploads 3/);
   assert.match(text, /chatbot_qq_files_parse_failed 1/);
+}
+
+function testLatexDisplayDelimitersRenderAsImageAndCleanText() {
+  const text = "\\[\n金融/会计/投行就业\n\\]\n\n那上财优势很大。";
+  assert.strictEqual(shouldRenderAsImage(text), true);
+  const cleaned = renderForQQ(text);
+  assert.match(cleaned, /金融\/会计\/投行就业/);
+  assert.doesNotMatch(cleaned, /\\\[/);
+  assert.doesNotMatch(cleaned, /\\\]/);
+}
+
+function testInvalidProxyStateIsQuarantinedAndReset() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-state-"));
+  const file = path.join(temp, "onebot-proxy-state.json");
+  const logs = [];
+  try {
+    fs.writeFileSync(file, "{\\ version\\:1}", "utf8");
+    const listenModes = new Map();
+    const quietUntil = new Map();
+
+    loadProxyState({
+      file,
+      listenModes,
+      quietUntil,
+      atOnlyGroups: [],
+      log: (...args) => logs.push(args.join(" "))
+    });
+
+    const reset = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.strictEqual(reset.version, 1);
+    assert.deepStrictEqual(reset.listen_modes, {});
+    assert.deepStrictEqual(reset.quiet_until, {});
+    assert.ok(fs.readdirSync(temp).some((name) => /^onebot-proxy-state\.json\.invalid-\d{14}$/.test(name)));
+    assert.ok(logs.some((line) => line.includes("proxy state reset invalid file")));
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
 }
 
 function testAtOnlyModeCommandCannotEnableAll() {
@@ -255,6 +294,8 @@ async function waitFor(predicate) {
 
 testAtOnlyRequiredPorts();
 testMetricsTextIncludesOperationalCounters();
+testLatexDisplayDelimitersRenderAsImageAndCleanText();
+testInvalidProxyStateIsQuarantinedAndReset();
 testAtOnlyModeCommandCannotEnableAll();
 testProfileCommandShowsGroupAndMemberFacts();
 testGroupUploadRequestsDownload();
