@@ -1,22 +1,20 @@
-# chatbot-qq v0.2.11｜local health alert markers
+# chatbot-qq v0.2.12｜profile visibility commands
 
-This release adds local alert markers for scheduled operations health reports, so failures leave an obvious file-level signal on the operator machine.
+This release makes personalization visible in chat by adding commands to inspect the group and user profile memory that drives future replies.
 
-中文关键词：QQ 机器人运维告警、健康报告、计划任务、Linux 防护、cc-connect QQ。
+中文关键词：QQ 机器人个性化回复、群聊画像、用户偏好、记忆纠偏、cc-connect QQ。
 
 ## Highlights
 
-- `scripts/get-chatbot-qq-health-report.ps1` now writes alert state under `backup\health-alerts` by default.
-- `ALERT.json` is updated on every run with `active`, `time`, `server`, `failures`, and `report`.
-- `ACTIVE.txt` exists only when the latest health report is failing.
-- Timestamped `chatbot-qq-health-alert-*.txt` files preserve short failure summaries for later inspection.
-- Successful reports automatically clear `ACTIVE.txt`.
+- Adds `/画像`, `画像`, `/我的偏好`, and `我的偏好`.
+- In group chats, the command returns recent group facts plus the current member's personal profile entries.
+- In private chats, the command returns the user's personal profile entries.
+- The reply includes the existing `/记住` and `/忘记` correction path so users can update stale preferences.
+- Adds unit coverage for group profile visibility.
 
 ## Verify
 
 ```powershell
-.\scripts\get-chatbot-qq-health-report.ps1
-(Get-Content -Raw .\backup\health-alerts\ALERT.json | ConvertFrom-Json).active
 $env:GOPROXY="https://goproxy.cn,direct"
 npm test
 git diff --check
@@ -24,13 +22,13 @@ git diff --check
 
 Expected:
 
-- A healthy run writes `ALERT.json` with `active: false`.
-- `ACTIVE.txt` is absent after a healthy run.
-- A failing run with `-NoExit` writes `ACTIVE.txt` and a timestamped alert summary.
+- `node scripts/test-onebot-proxy-units.js` includes the new profile command check.
+- `/画像` is recognized as a proxy command.
+- The command returns both group-level and member-level remembered facts when available.
 
 ## Deployment Notes
 
-- This release is especially relevant for unattended Windows scheduled tasks, where operators need a simple persistent signal after a failed run.
+- This is a chat UX improvement; deploy by restarting `onebot-group-proxy` after updating `scripts/lib/proxy-commands.js`.
 - Real server addresses, QQ IDs, and API keys must stay in ignored local files or operator-provided command arguments.
 
 ## Full Changelog

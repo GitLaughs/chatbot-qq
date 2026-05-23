@@ -5,6 +5,7 @@ const COMMAND_NAMES = [
   "/help", "help", "帮助",
   "/status", "状态",
   "/记住", "记住",
+  "/画像", "画像", "/我的偏好", "我的偏好",
   "/忘记", "忘记",
   "/总结今天", "总结今天", "/今日总结", "今日总结",
   "/找文件", "找文件",
@@ -51,6 +52,8 @@ function createProxyCommands(deps) {
     if (status !== null) return reply(proxyStatusText(msg));
     const remember = commandBody(msg, ["/记住", "记住"]);
     if (remember !== null) return reply(rememberFact(msg, remember));
+    const profile = commandBody(msg, ["/画像", "画像", "/我的偏好", "我的偏好"]);
+    if (profile !== null) return reply(showProfile(msg, profile));
     const forget = commandBody(msg, ["/忘记", "忘记"]);
     if (forget !== null) return reply(forgetFact(msg, forget));
     const summary = commandBody(msg, ["/总结今天", "总结今天", "/今日总结", "今日总结"]);
@@ -75,6 +78,7 @@ function createProxyCommands(deps) {
       "/help：查看功能",
       "/status：查看连接、队列、触发模式",
       "/记住 内容：写入当前用户/群画像",
+      "/画像：查看当前群/个人画像",
       "/忘记 关键词：删除画像中匹配的记录",
       "/总结今天：汇总今天聊天",
       "/找文件 关键词：查本群/私聊文件索引",
@@ -123,6 +127,31 @@ function createProxyCommands(deps) {
     deps.ensurePrivateProfile(workspace, msg);
     deps.appendLine(path.join(workspace, "PROFILE.md"), `- ${now} 用户补充: ${fact}`);
     return "已记住。";
+  }
+
+  function showProfile(msg, body) {
+    const keyword = String(body || "").trim().toLowerCase();
+    if (msg.message_type === "group") {
+      const workspace = deps.workspaceForGroup(msg.group_id);
+      const groupLines = readProfileLines(path.join(workspace, "GROUP_PROFILE.md"), keyword, 8);
+      const memberLines = readProfileLines(deps.memberProfilePath(msg, workspace), keyword, 8);
+      return [
+        "当前画像：",
+        "群偏好/事实：",
+        ...(groupLines.length ? groupLines : ["- 暂无"]),
+        "你的偏好/补充：",
+        ...(memberLines.length ? memberLines : ["- 暂无"]),
+        "提示：用 /记住 内容 补充；用 /忘记 关键词 删除。"
+      ].join("\n").slice(0, 1600);
+    }
+
+    const workspace = deps.workspaceForPrivateUser(msg.user_id);
+    const lines = readProfileLines(path.join(workspace, "PROFILE.md"), keyword, 12);
+    return [
+      "当前个人画像：",
+      ...(lines.length ? lines : ["- 暂无"]),
+      "提示：用 /记住 内容 补充；用 /忘记 关键词 删除。"
+    ].join("\n").slice(0, 1400);
   }
 
   function forgetFact(msg, body) {
@@ -282,6 +311,16 @@ function collectFileIndexMatches(workspace, keyword, out) {
       out.push(line.replace(/^\s*[-*]\s*/, "").trim());
     }
   }
+}
+
+function readProfileLines(file, keyword, max) {
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- "))
+    .filter((line) => !keyword || line.toLowerCase().includes(keyword))
+    .slice(-max);
 }
 
 function collectArchiveSummaryMatches(workspace, keyword, out) {

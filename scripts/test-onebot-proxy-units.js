@@ -102,6 +102,58 @@ function testAtOnlyModeCommandCannotEnableAll() {
   assert.strictEqual(deps.listenModeByGroup.has(100000002), false);
 }
 
+function testProfileCommandShowsGroupAndMemberFacts() {
+  const replies = [];
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-profile-"));
+  try {
+    const memberFile = path.join(temp, "members", "1.md");
+    appendLine(path.join(temp, "GROUP_PROFILE.md"), "- 2026-05-23 群偏好/事实: 默认短答，先给结论");
+    appendLine(memberFile, "- 2026-05-23 用户补充: 喜欢步骤化说明");
+    const deps = {
+      messageText: (msg) => msg.raw_message || "",
+      sendPrivateText: (_userID, _messageID, text) => replies.push(text),
+      sendGroupText: (_groupID, _messageID, text) => replies.push(text),
+      healthSnapshot: () => ({ ok: true, upstream: { ready: true }, pending: { upstream_queue: 0, outbound: 0 } }),
+      imageStateKey: () => "group:100000002",
+      imageStates: new Map(),
+      effectiveListenMode: () => "mention",
+      defaultListenMode: "selective",
+      atOnlyGroups: [100000002],
+      isGroupQuiet: () => false,
+      adminUsers: [],
+      allowedGroups: [100000002],
+      allowedPrivateUsers: [],
+      workspaceForGroup: () => temp,
+      workspaceForPrivateUser: () => temp,
+      ensureGroupProfile: () => {},
+      ensurePrivateProfile: () => {},
+      appendLine: () => {},
+      memberProfilePath: () => memberFile,
+      removeLinesContaining: () => 0,
+      todayLocal: () => "2026-05-23",
+      quietUntilByGroup: new Map(),
+      persistProxyState: () => {},
+      pending: [],
+      pendingOutbound: new Map(),
+      pendingFileDownloads: new Map(),
+      listenStates: new Map(),
+      botReplyRoutes: new Map(),
+      listenModeByGroup: new Map(),
+      maskSensitive: (value) => value
+    };
+    const commands = createProxyCommands(deps);
+    const msg = { message_type: "group", group_id: 100000002, user_id: 1, message_id: 2, raw_message: "/画像" };
+
+    assert.strictEqual(commands.isProxyCommand(msg), true);
+    commands.handleProxyCommand(msg);
+    assert.match(replies[0], /当前画像/);
+    assert.match(replies[0], /默认短答/);
+    assert.match(replies[0], /步骤化说明/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
 function testGroupUploadRequestsDownload() {
   const sent = [];
   const replies = [];
@@ -204,6 +256,7 @@ async function waitFor(predicate) {
 testAtOnlyRequiredPorts();
 testMetricsTextIncludesOperationalCounters();
 testAtOnlyModeCommandCannotEnableAll();
+testProfileCommandShowsGroupAndMemberFacts();
 testGroupUploadRequestsDownload();
 testGroupFileDownloadArchivesText().then(() => {
   console.log("onebot proxy unit checks ok");

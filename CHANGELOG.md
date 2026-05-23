@@ -7,6 +7,13 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-05-23
+
+### Added
+
+- Added `/画像`, `画像`, `/我的偏好`, and `我的偏好` commands for viewing current group and personal profile memory.
+- Added unit coverage for the profile visibility command.
+
 ## [0.2.11] - 2026-05-23
 
 ### Added
