@@ -7,6 +7,33 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-05-23
+
+### Added
+
+- Added reusable OneBot proxy command, health, and persistent-state modules.
+- Added unit checks for @-only group routing and protected mode switching.
+- Added Linux integrity-check and cleanup timers for deployed QQ runtime files.
+- Added Windows daily server backup, restore, and dry-run restore scripts.
+
+### Changed
+
+- Changed the second example group to @-only routing and removed its passive listen port.
+- Updated cc-connect QQ systemd startup to wait for ports from `ONEBOT_PROXY_PORTS`.
+- Updated public deployment notes and examples for multi-private-user routing.
+
+### Fixed
+
+- Silenced cc-connect idle/session rollover status messages at the proxy layer.
+- Improved group file-upload handling so uploads are archived by the proxy instead of being treated as ordinary chat prompts.
+- Added outbound retry tracking for OneBot send actions.
+
+### Security
+
+- Hardened QQ systemd units with read-only system paths, reduced capabilities, kernel/control-group protections, and restricted address families.
+- Added log masking for numeric QQ identifiers in proxy logs.
+- Kept release examples sanitized with placeholder IDs only.
+
 ## [0.2.1] - 2026-05-23
 
 ### Fixed

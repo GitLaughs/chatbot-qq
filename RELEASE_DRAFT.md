@@ -1,56 +1,42 @@
-# chatbot-qq v0.2.1｜beginner installers and checksum fix
+# chatbot-qq v0.2.2｜runtime hardening and @-only group routing
 
-Packages beginner installation flows and public-facing repository polish for the QQ cc-connect adapter workspace, with Go module checksums included for CI.
+This release hardens the NapCat / OneBot runtime path for the QQ cc-connect adapter and adds regression checks around the production routing rules.
 
-中文关键词：QQ 机器人、cc-connect QQ、NapCat、OneBot v11、QQ群机器人、QQ Bot、双路由、群聊工作区、做梦、画图、Linux 部署。
+中文关键词：QQ 机器人、cc-connect QQ、NapCat、OneBot v11、QQ群 @ 触发、Linux 防护、自动备份、完整性校验、文件归档。
 
 ## Highlights
 
-- Adds a Windows beginner installer for generating local cc-connect QQ config and workspace folders.
-- Adds a Linux beginner installer for `/root/.cc-connect-qq`, `/etc/chatbot-qq.env`, and isolated systemd services.
-- Adds Chinese Windows and Linux installation guides.
-- Refreshes README with badges, keywords, requirements, quick start, and clearer architecture context.
-- Adds GitHub release config, issue templates, PR template, and repository metadata guidance.
-- Sanitizes public examples so real group IDs, private user IDs, and placeholder keys stay out of the release.
-- Adds `go.sum` so Go validation runs cleanly on GitHub Actions.
-
-## Install
-
-Windows:
-
-```powershell
-Copy-Item configs\cc-connect.napcat.example.toml configs\cc-connect.napcat.local.toml
-.\scripts\start-cc-connect-napcat.ps1
-```
-
-Linux:
-
-```powershell
-.\scripts\deploy-napcat-server.ps1 -InstallServices
-```
-
-Set real QQ group IDs and secrets only in ignored local config or `/etc/chatbot-qq.env`.
+- Adds reusable proxy modules for commands, health snapshots, and persistent state.
+- Keeps an @-only group on its @ proxy only; no passive listen proxy is opened for that group.
+- Silences cc-connect idle/session rollover messages before they reach QQ chats.
+- Handles group file uploads at the proxy layer so files are archived and indexed before users ask for summaries or extraction.
+- Adds outbound retry tracking for OneBot send actions.
+- Adds Linux systemd hardening for the QQ proxy and cc-connect QQ services.
+- Adds integrity-check and cleanup timers for deployed runtime code and generated artifacts.
+- Adds Windows backup, restore, and dry-run restore scripts for server data.
+- Adds unit checks and extends the release test script to cover @-only routing behavior.
 
 ## Verify
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
+$env:GOPROXY="https://goproxy.cn,direct"
+npm test
 git diff --check
 ```
 
 Expected:
 
+- Go package checks pass when dependencies are reachable.
 - Node syntax checks pass.
+- OneBot proxy unit checks pass.
 - PowerShell parser checks pass.
 - Sensitive local-data scan passes.
-- Go tests run when Go is installed locally; CI installs Go before running the same test script.
 
-## Attribution
+## Deployment Notes
 
-This project is a deployment/configuration layer around
-[cc-connect](https://github.com/chenhg5/cc-connect), which is MIT licensed.
-NapCat / OneBot support is adapter-side integration and should be treated as
-separate from QQ official bot APIs.
+- Real QQ group IDs, private user IDs, API keys, and NapCat tokens must stay in ignored local files or `/etc/chatbot-qq.env`.
+- Public examples use placeholder IDs only.
+- After deploying intentional code changes to Linux, rebuild the integrity baseline before relying on the drift timer.
 
 ## Full Changelog
 
