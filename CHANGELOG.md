@@ -7,6 +7,17 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-05-23
+
+### Added
+
+- Added machine-readable Linux integrity status at `/var/lib/chatbot-qq-integrity/status.json`.
+- Added integrity status to the operations health report and server check summary.
+
+### Changed
+
+- Operations reports now fail when the integrity check reports drift or the status file is missing.
+
 ## [0.2.7] - 2026-05-23
 
 ### Added

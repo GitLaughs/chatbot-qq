@@ -196,9 +196,32 @@ if ($metricsRaw -notmatch "chatbot_qq_up 1") {
 
 $integrityTail = Invoke-RemoteText "tail -n 5 /var/log/chatbot-qq-integrity.log 2>/dev/null || true"
 $cleanupTail = Invoke-RemoteText "tail -n 5 /var/log/chatbot-qq-cleanup.log 2>/dev/null || true"
+$integrityStatusRaw = Invoke-RemoteText "cat /var/lib/chatbot-qq-integrity/status.json 2>/dev/null || true"
 $report.logs = [ordered]@{
     integrity_tail = @($integrityTail -split "`n" | Where-Object { $_ })
     cleanup_tail = @($cleanupTail -split "`n" | Where-Object { $_ })
+}
+if ($integrityStatusRaw.Trim()) {
+    try {
+        $integrityStatus = $integrityStatusRaw | ConvertFrom-Json
+        $report.integrity = $integrityStatus
+        if (-not $integrityStatus.ok) {
+            $failures.Add("integrity status is $($integrityStatus.state)") | Out-Null
+        }
+    } catch {
+        $report.integrity = [ordered]@{
+            ok = $false
+            parse_error = $_.Exception.Message
+            raw = $integrityStatusRaw
+        }
+        $failures.Add("integrity status parse failed") | Out-Null
+    }
+} else {
+    $report.integrity = [ordered]@{
+        ok = $false
+        state = "missing"
+    }
+    $failures.Add("integrity status missing") | Out-Null
 }
 
 $backup = Test-BackupStatus
@@ -220,6 +243,10 @@ if (-not $IncludeSensitive) {
     if ($report.logs) {
         $report.logs.integrity_tail = @($report.logs.integrity_tail | ForEach-Object { Mask-Text $_ })
         $report.logs.cleanup_tail = @($report.logs.cleanup_tail | ForEach-Object { Mask-Text $_ })
+    }
+    if ($report.integrity) {
+        $report.integrity.root = Mask-Text $report.integrity.root
+        $report.integrity.manifest = Mask-Text $report.integrity.manifest
     }
     if ($report.backup) {
         $report.backup.server = Mask-Text $report.backup.server

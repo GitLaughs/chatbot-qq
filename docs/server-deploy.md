@@ -116,7 +116,7 @@ The installed systemd units use a tighter sandbox than the first prototype:
 
 - `ProtectSystem=strict` with write access only to QQ runtime data.
 - `NoNewPrivileges=true`, empty `CapabilityBoundingSet`, `PrivateTmp=true`.
-- `chatbot-qq-integrity-check.timer` checks code and deploy files against a SHA256 manifest every 30 minutes.
+- `chatbot-qq-integrity-check.timer` checks code and deploy files against a SHA256 manifest every 30 minutes and writes `/var/lib/chatbot-qq-integrity/status.json`.
 - `chatbot-qq-cleanup.timer` removes old logs and generated runtime artifacts daily with conservative retention defaults.
 
 On the first integrity run, the manifest is initialized under `/var/lib/chatbot-qq-integrity/sha256sums.txt`. After intentional deployment, remove that manifest or run the check once after updating it so the next baseline matches the new code.

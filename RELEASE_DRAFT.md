@@ -1,21 +1,24 @@
-# chatbot-qq v0.2.7｜scheduled health reports
+# chatbot-qq v0.2.8｜integrity status reporting
 
-This release turns the operations health report into a daily local artifact and makes the default report safer to share.
+This release makes Linux code integrity checks visible to automation instead of only writing log lines.
 
-中文关键词：QQ 机器人巡检、每日健康报告、Windows 计划任务、脱敏报告、LATEST.json、cc-connect QQ。
+中文关键词：QQ 机器人防护、代码完整性、SHA256 manifest、status.json、运维报告、cc-connect QQ。
 
 ## Highlights
 
-- Adds `-InstallScheduledTask` to `scripts/get-chatbot-qq-health-report.ps1`.
-- Writes health reports to `backup/health-reports` with a `LATEST.json` pointer.
-- Retains health report history with a configurable keep-days window.
-- Redacts QQ numeric identifiers from health report output by default.
-- Updates the server check script to print a compact latest-health-report summary by default.
+- Writes `/var/lib/chatbot-qq-integrity/status.json` after integrity initialization, successful verification, or drift detection.
+- Includes integrity status in the operations health report.
+- Fails the operations report when integrity status is missing or reports drift.
+- Shows integrity summary in `scripts/check-napcat-server.ps1`.
 
 ## Verify
 
+```bash
+systemctl start chatbot-qq-integrity-check.service
+cat /var/lib/chatbot-qq-integrity/status.json
+```
+
 ```powershell
-.\scripts\get-chatbot-qq-health-report.ps1 -InstallScheduledTask
 .\scripts\get-chatbot-qq-health-report.ps1
 $env:GOPROXY="https://goproxy.cn,direct"
 npm test
@@ -24,15 +27,13 @@ git diff --check
 
 Expected:
 
-- The scheduled task `CHATBOT-QQ daily health report` is installed.
-- `backup/health-reports/LATEST.json` is created.
-- The report JSON contains `"ok": true` when services, proxy health, metrics, and backup status are healthy.
-- Sensitive numeric QQ identifiers are redacted unless `-IncludeSensitive` is explicitly used.
+- Integrity status reports `"ok": true` and state `ok` after a verification run.
+- The operations report contains `"ok": true` only when service health, backup health, and integrity status are all healthy.
 
 ## Deployment Notes
 
-- The default scheduled time is 04:00, after the default 03:40 backup task.
-- Keep raw sensitive operational data in ignored local files only.
+- Rebuild the manifest after intentional deployment by deleting `/var/lib/chatbot-qq-integrity/sha256sums.txt` and running the integrity check once.
+- Treat `state: "drift"` as a production incident unless it follows an intentional deployment.
 
 ## Full Changelog
 

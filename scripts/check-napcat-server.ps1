@@ -50,6 +50,8 @@ if (Test-Path $healthLatest) {
         server = $health.server
         failures = $health.failures
         backup_ok = $health.backup.ok
+        integrity_ok = $health.integrity.ok
+        integrity_state = $health.integrity.state
         proxy_ok = $health.proxy.health.ok
     } | ConvertTo-Json -Depth 6
 } else {
