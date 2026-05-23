@@ -43,9 +43,13 @@ Protection rules:
 Ports:
 
 - NapCat upstream OneBot WebSocket: `127.0.0.1:3001`
-- first group listen / @ proxy: `127.0.0.1:3002` / `127.0.0.1:3003`
-- second group listen / @ proxy: `127.0.0.1:3004` / `127.0.0.1:3005`
-- private user proxy: `127.0.0.1:3006`
+- group `100000001` listen / @ proxy: `127.0.0.1:3002` / `127.0.0.1:3003`
+- group `100000002` @ proxy only: `127.0.0.1:3005`; no listen proxy is opened for this group
+- private user `200000001` proxy: `127.0.0.1:3006`
+- private user `200000002` proxy: `127.0.0.1:3007`
+- private user `200000003` proxy: `127.0.0.1:3008`
+- private user `200000004` proxy: `127.0.0.1:3009`
+- OneBot proxy health check: `127.0.0.1:3010/healthz`
 
 From Windows, sync the folder to the server without deploying the bundled Windows NapCat package:
 
@@ -65,13 +69,18 @@ The script refuses to use `/root/.cc-connect` or `/opt/openclaw` as QQ targets.
 On the server, edit `/etc/chatbot-qq.env` and keep only the approved QQ group IDs:
 
 ```bash
-ONEBOT_ALLOWED_GROUPS=REPLACE_WITH_GROUP_ID_A,REPLACE_WITH_GROUP_ID_B
-ONEBOT_ALLOWED_PRIVATE_USERS=REPLACE_WITH_PRIVATE_USER_ID_A
+ONEBOT_ALLOWED_GROUPS=100000001,100000002
+ONEBOT_ALLOWED_PRIVATE_USERS=200000001,200000002,200000003,200000004
 ONEBOT_UPSTREAM_URL=ws://127.0.0.1:3001
-ONEBOT_PROXY_PORTS=3002,3003,3004,3005,3006
+ONEBOT_PROXY_PORTS=3002,3003,3005,3006,3007,3008,3009
+ONEBOT_HEALTH_HOST=127.0.0.1
+ONEBOT_HEALTH_PORT=3010
+ONEBOT_OUTGOING_RETRY_MAX=2
+ONEBOT_OUTGOING_RESPONSE_TIMEOUT_MS=12000
+ONEBOT_OUTGOING_RETRY_BASE_DELAY_MS=1200
 ONEBOT_LISTEN_PORT=3002
 ONEBOT_AT_PORT=3003
-ONEBOT_PRIVATE_ROUTES=REPLACE_WITH_PRIVATE_USER_ID_A:3006
+ONEBOT_PRIVATE_ROUTES=200000001:3006,200000002:3007,200000003:3008,200000004:3009
 ONEBOT_ACK_EMOJI_ID=76
 ONEBOT_DREAM_COMMAND_ENABLED=1
 ONEBOT_DREAM_TRIGGERS=/dream,做梦
@@ -101,6 +110,52 @@ After NapCat is logged in and exposes `ws://127.0.0.1:3001`, start the isolated 
 ```bash
 systemctl start onebot-group-proxy
 systemctl start cc-connect-qq
+```
+
+The installed systemd units use a tighter sandbox than the first prototype:
+
+- `ProtectSystem=strict` with write access only to QQ runtime data.
+- `NoNewPrivileges=true`, empty `CapabilityBoundingSet`, `PrivateTmp=true`.
+- `chatbot-qq-integrity-check.timer` checks code and deploy files against a SHA256 manifest every 30 minutes.
+- `chatbot-qq-cleanup.timer` removes old logs and generated runtime artifacts daily with conservative retention defaults.
+
+On the first integrity run, the manifest is initialized under `/var/lib/chatbot-qq-integrity/sha256sums.txt`. After intentional deployment, remove that manifest or run the check once after updating it so the next baseline matches the new code.
+
+Cleanup retention defaults:
+
+```bash
+CHATBOT_QQ_LOG_KEEP_DAYS=14
+CHATBOT_QQ_GENERATED_KEEP_DAYS=30
+CHATBOT_QQ_ARCHIVE_KEEP_DAYS=90
+```
+
+Local daily backup from Windows:
+
+```powershell
+cd E:\CHATBOT-QQ
+.\scripts\backup-chatbot-qq-server.ps1 -InstallScheduledTask
+```
+
+Manual backup:
+
+```powershell
+.\scripts\backup-chatbot-qq-server.ps1
+```
+
+By default this backs up group/user workspaces and cc-connect runtime data, but skips `/etc/chatbot-qq.env` so API keys are not copied casually. Add `-IncludeSecrets` only when making an encrypted/offline key backup.
+
+Restore a backup to the server:
+
+```powershell
+.\scripts\restore-chatbot-qq-server.ps1 -Archive E:\CHATBOT-QQ\backup\server-daily\chatbot-qq-server-YYYYMMDD-HHMMSS.tar.gz -RestartServices
+```
+
+Secrets are not restored unless `-RestoreSecrets` is also passed.
+
+Dry-run restore test, without touching live `/opt/chatbot-qq`:
+
+```powershell
+.\scripts\test-restore-chatbot-qq-backup.ps1 -Archive E:\CHATBOT-QQ\backup\server-daily\chatbot-qq-server-YYYYMMDD-HHMMSS.tar.gz
 ```
 
 Check that Feishu stayed active and QQ ports are isolated:
@@ -133,7 +188,8 @@ Then use `cc-connect-qq.service`.
 - Do not reuse `/root/.cc-connect/config.toml` unless intentionally merging with OpenClaw.
 - Do not set `data_dir = "/root/.cc-connect"` for QQ.
 - Do not deploy `tools/NapCat.Shell.Windows.OneKey` to Linux.
-- Keep OneBot ports `3001` through `3006` unique.
+- Keep OneBot ports `3001` through `3009` unique.
+- Keep health port `3010` local-only.
 - Keep QQ group workspaces under `/opt/chatbot-qq/groups`, not `/opt/openclaw`.
 - Keep QQ private workspaces under `/opt/chatbot-qq/users`, not in group folders.
 - Keep secrets in `/etc/chatbot-qq.env` or ignored local config files.

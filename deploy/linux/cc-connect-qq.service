@@ -9,9 +9,26 @@ WorkingDirectory=/opt/chatbot-qq
 EnvironmentFile=-/etc/chatbot-qq.env
 Environment=HOME=/root/.codex-qq-home
 Environment=USER=root
+ExecStartPre=/bin/bash -lc 'IFS=, read -ra ports <<< "${ONEBOT_PROXY_PORTS:-3002,3003,3005,3006,3007,3008,3009}"; for port in "${ports[@]}"; do port="${port//[[:space:]]/}"; [ -z "$port" ] && continue; for i in {1..30}; do timeout 1 bash -c "</dev/tcp/127.0.0.1/$port" >/dev/null 2>&1 && break; sleep 1; done; timeout 1 bash -c "</dev/tcp/127.0.0.1/$port" >/dev/null 2>&1; done'
 ExecStart=/usr/bin/env cc-connect --config /root/.cc-connect-qq/config.toml --force
 Restart=always
 RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/opt/chatbot-qq/groups /opt/chatbot-qq/users /opt/chatbot-qq/.cc-connect /root/.cc-connect-qq /root/.codex-qq-home /var/log
+ReadOnlyPaths=/opt/chatbot-qq/AGENTS.md /opt/chatbot-qq/docs /opt/chatbot-qq/configs
+CapabilityBoundingSet=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+LimitNOFILE=8192
 StandardOutput=append:/var/log/cc-connect-qq.log
 StandardError=append:/var/log/cc-connect-qq.log
 

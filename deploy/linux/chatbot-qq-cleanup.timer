@@ -1,0 +1,10 @@
+[Unit]
+Description=Run CHATBOT QQ runtime cleanup
+
+[Timer]
+OnCalendar=*-*-* 04:20:00
+AccuracySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

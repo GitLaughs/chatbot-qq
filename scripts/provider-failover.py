@@ -13,11 +13,13 @@ from urllib import error, request
 CONFIG = pathlib.Path(os.environ.get("QQ_CC_CONNECT_CONFIG", "/root/.cc-connect-qq/config.toml"))
 ENV_FILE = pathlib.Path(os.environ.get("CHATBOT_QQ_ENV", "/etc/chatbot-qq.env"))
 PROJECTS = [
-    "qq-sandbox-GROUP_ID_A-listen",
-    "qq-sandbox-GROUP_ID_A-at",
-    "qq-sandbox-GROUP_ID_B-listen",
-    "qq-sandbox-GROUP_ID_B-at",
-    "qq-private-PRIVATE_USER_ID_A",
+    "qq-sandbox-listen-100000001",
+    "qq-sandbox-at-100000001",
+    "qq-sandbox-at-100000002",
+    "qq-private-200000001",
+    "qq-private-200000002",
+    "qq-private-200000003",
+    "qq-private-200000004",
 ]
 CC_SWITCH_DB = pathlib.Path(os.environ.get("CC_SWITCH_DB", "/root/.cc-switch/cc-switch.db"))
 

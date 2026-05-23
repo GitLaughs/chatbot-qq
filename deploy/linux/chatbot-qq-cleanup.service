@@ -1,0 +1,24 @@
+[Unit]
+Description=CHATBOT QQ runtime cleanup
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/chatbot-qq.env
+ExecStart=/bin/bash /opt/chatbot-qq/deploy/linux/chatbot-qq-cleanup.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/chatbot-qq/deploy
+ReadWritePaths=/opt/chatbot-qq/groups /opt/chatbot-qq/users /var/log
+CapabilityBoundingSet=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+StandardOutput=append:/var/log/chatbot-qq-cleanup.log
+StandardError=append:/var/log/chatbot-qq-cleanup.log

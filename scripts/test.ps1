@@ -11,13 +11,24 @@ function Step($Message) {
 Step "Go tests"
 if (Get-Command go -ErrorAction SilentlyContinue) {
   go test ./...
+  if ($LASTEXITCODE -ne 0) {
+    throw "go test failed"
+  }
 } else {
   Write-Host "SKIP: go not found on PATH"
 }
 
 Step "Node syntax checks"
 node --check scripts/onebot-group-proxy.js
+if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: onebot-group-proxy.js" }
 node --check scripts/generate-image.js
+if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: generate-image.js" }
+node --check scripts/test-onebot-proxy-units.js
+if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: test-onebot-proxy-units.js" }
+
+Step "OneBot proxy unit checks"
+node scripts/test-onebot-proxy-units.js
+if ($LASTEXITCODE -ne 0) { throw "onebot proxy unit checks failed" }
 
 Step "PowerShell parser checks"
 $psFiles = Get-ChildItem -Path scripts,deploy -Recurse -Filter *.ps1 -File
