@@ -7,6 +7,18 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-05-23
+
+### Added
+
+- Added a dedicated OneBot proxy file-archive module for group upload handling.
+- Added file-processing counters to the proxy health snapshot.
+- Added unit coverage for group upload download requests and text-file archive extraction.
+
+### Changed
+
+- Moved group file save, sidecar archive, extracted text, and archive notice logic out of the main proxy entrypoint.
+
 ## [0.2.2] - 2026-05-23
 
 ### Added

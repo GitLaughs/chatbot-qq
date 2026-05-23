@@ -1,6 +1,10 @@
 const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const { createHealthSnapshot } = require("./lib/proxy-health");
 const { createProxyCommands } = require("./lib/proxy-commands");
+const { createProxyFiles } = require("./lib/proxy-files");
 
 function testAtOnlyRequiredPorts() {
   const clients = new Map([[3002, {}], [3003, {}], [3005, {}], [3006, {}]]);
@@ -79,6 +83,111 @@ function testAtOnlyModeCommandCannotEnableAll() {
   assert.strictEqual(deps.listenModeByGroup.has(100000002), false);
 }
 
+function testGroupUploadRequestsDownload() {
+  const sent = [];
+  const replies = [];
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-files-upload-"));
+  try {
+    const files = createProxyFiles({
+      workspaceForGroup: () => temp,
+      appendLine,
+      todayLocal: () => "2026-05-23",
+      pendingFileDownloads: new Map(),
+      sendUpstream: (obj) => sent.push(obj),
+      sendGroupText: (_groupID, _messageID, text) => replies.push(text),
+      safeName,
+      ensureDir,
+      extractPdfText: async () => "",
+      buildFileSummary: () => "",
+      log: () => {}
+    });
+
+    files.handleGroupUpload({
+      group_id: 100000002,
+      user_id: 1,
+      message_id: 2,
+      file: { id: "file-1", name: "lecture.pdf", size: 12 }
+    });
+
+    assert.strictEqual(sent.length, 1);
+    assert.strictEqual(sent[0].action, "get_file");
+    assert.strictEqual(sent[0].params.file_id, "file-1");
+    assert.strictEqual(replies.length, 1);
+    assert.match(replies[0], /正在自动下载归档/);
+    assert.strictEqual(files.stats.group_uploads, 1);
+    assert.strictEqual(files.stats.download_requests, 1);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+async function testGroupFileDownloadArchivesText() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-files-archive-"));
+  const source = path.join(temp, "source.txt");
+  fs.writeFileSync(source, "第一章\n重点内容\n", "utf8");
+  const replies = [];
+  try {
+    const files = createProxyFiles({
+      workspaceForGroup: () => temp,
+      appendLine,
+      todayLocal: () => "2026-05-23",
+      pendingFileDownloads: new Map(),
+      sendUpstream: () => {},
+      sendGroupText: (_groupID, _messageID, text) => replies.push(text),
+      safeName,
+      ensureDir,
+      extractPdfText: async () => "",
+      buildFileSummary: (_saved, text) => `# Summary\n\n${text}`,
+      log: () => {}
+    });
+
+    const archived = files.handleGroupFileDownloadResponse({
+      groupID: 100000002,
+      fileName: "source.txt",
+      messageID: 2,
+      fileInfo: { name: "source.txt" }
+    }, { data: { path: source } });
+    await waitFor(() => replies.length === 1);
+
+    assert.strictEqual(archived, true);
+    assert.strictEqual(files.stats.archived, 1);
+    assert.strictEqual(files.stats.parse_success, 1);
+    assert.match(replies[0], /已提取文本/);
+    assert.ok(fs.existsSync(path.join(temp, "local_files", "archive", "2026-05-23", "source.txt.archive", "extracted.txt")));
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function appendLine(file, line) {
+  ensureDir(path.dirname(file));
+  fs.appendFileSync(file, `${line}\n`, "utf8");
+}
+
+function ensureDir(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function safeName(value) {
+  return String(value || "unknown").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").slice(0, 80);
+}
+
+async function waitFor(predicate) {
+  for (let i = 0; i < 50; i += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for async file archive");
+}
+
 testAtOnlyRequiredPorts();
 testAtOnlyModeCommandCannotEnableAll();
-console.log("onebot proxy unit checks ok");
+testGroupUploadRequestsDownload();
+testGroupFileDownloadArchivesText().then(() => {
+  console.log("onebot proxy unit checks ok");
+}).catch((err) => {
+  console.error(err);
+  process.exitCode = 1;
+});

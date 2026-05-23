@@ -33,6 +33,7 @@ function createHealthSnapshot(deps) {
       file_downloads: deps.pendingFileDownloads.size,
       bot_reply_routes: deps.botReplyRoutes.size
     },
+    files: deps.fileStats || {},
     modes: {
       default: deps.defaultListenMode,
       overrides: Object.fromEntries([...deps.listenModeByGroup.entries()].map(([groupID, mode]) => [deps.maskID(groupID), mode]))
