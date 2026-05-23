@@ -7,6 +7,15 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+### Added
+
+- Added `docs/daily-group-product-plan.md` as a private friend-group personalization plan rather than a public product plan.
+- Added `docs/optimization-report-2026-05-23.md` with current QQ bridge status and next self-use hardening steps.
+
+### Changed
+
+- Clarified the default group workspace instructions for warm, natural, profile-aware replies.
+
 ## [0.2.17] - 2026-05-23
 
 ### Fixed

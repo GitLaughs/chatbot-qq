@@ -49,6 +49,8 @@ This repo keeps those paths separate so a working NapCat deployment does not blo
 - `docs/napcat-setup.md` - NapCat / OneBot setup guide
 - `docs/qqbot-auth-and-setup.md` - official QQ Bot fallback guide
 - `docs/server-deploy.md` - Linux server deployment notes and conflict checklist
+- `docs/daily-group-product-plan.md` - private friend-group personalization and memory plan
+- `docs/optimization-report-2026-05-23.md` - current self-use optimization report
 - `deploy/linux` - isolated systemd/env templates for the Linux NapCat route
 
 ## Requirements
