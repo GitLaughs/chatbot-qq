@@ -1,0 +1,17 @@
+[Unit]
+Description=cc-connect QQ bot
+After=network-online.target onebot-group-proxy.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/chatbot-qq
+EnvironmentFile=-/etc/chatbot-qq.env
+ExecStart=/usr/bin/env cc-connect --config /root/.cc-connect-qq/config.toml --force
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/cc-connect-qq.log
+StandardError=append:/var/log/cc-connect-qq.log
+
+[Install]
+WantedBy=multi-user.target

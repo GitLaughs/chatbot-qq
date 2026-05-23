@@ -1,0 +1,12 @@
+{
+  "name": "chatbot-qq",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "onebot-proxy": "node scripts/onebot-group-proxy.js",
+    "test": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/test.ps1"
+  },
+  "dependencies": {
+    "ws": "^8.17.1"
+  }
+}

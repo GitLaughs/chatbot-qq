@@ -1,0 +1,17 @@
+[Unit]
+Description=CHATBOT QQ OneBot group proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/chatbot-qq
+EnvironmentFile=-/etc/chatbot-qq.env
+ExecStart=/usr/bin/env npm run onebot-proxy
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/onebot-group-proxy.log
+StandardError=append:/var/log/onebot-group-proxy.log
+
+[Install]
+WantedBy=multi-user.target

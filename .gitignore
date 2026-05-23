@@ -1,0 +1,17 @@
+.env
+*.local.toml
+*.local.toml.lock
+bin/
+dist/
+node_modules/
+*.log
+.cc-connect/
+backup/
+tools/
+chatbot-qq-qrcode.png
+groups/sandbox-*/
+groups/*/members/
+groups/*/memory/
+groups/*/local_files/generated/
+groups/*/local_files/rendered/
+scripts/run-*.cmd

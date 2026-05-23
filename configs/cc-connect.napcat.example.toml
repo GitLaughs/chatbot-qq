@@ -1,0 +1,114 @@
+# cc-connect QQ config via NapCat / OneBot v11.
+# Copy to configs/cc-connect.napcat.local.toml and adjust ws_url/token/allow_from.
+
+language = "zh"
+data_dir = "E:\\CHATBOT-QQ\\.cc-connect"
+
+[log]
+level = "info"
+
+[display]
+mode = "compact"
+thinking_messages = false
+tool_messages = false
+show_context_indicator = false
+reply_footer = false
+
+[stream_preview]
+enabled = false
+
+[instant_reply]
+enabled = false
+content = ""
+
+[rate_limit]
+max_messages = 20
+window_secs = 60
+
+[[projects]]
+name = "qq-sandbox-group-a-listen"
+reset_on_idle_mins = 30
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-<group-id-a>"
+mode = "full-auto"
+model = "gpt-5.4-mini"
+reasoning_effort = "medium"
+
+[[projects.platforms]]
+type = "qq"
+
+[projects.platforms.options]
+ws_url = "ws://127.0.0.1:3002"
+token = ""
+allow_from = "*"
+share_session_in_channel = true
+
+[[projects]]
+name = "qq-sandbox-group-a-at"
+reset_on_idle_mins = 30
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-<group-id-a>"
+mode = "full-auto"
+model = "gpt-5.5"
+reasoning_effort = "high"
+
+[[projects.platforms]]
+type = "qq"
+
+[projects.platforms.options]
+ws_url = "ws://127.0.0.1:3003"
+token = ""
+allow_from = "*"
+share_session_in_channel = false
+
+[[projects]]
+name = "qq-sandbox-group-b-listen"
+reset_on_idle_mins = 30
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-<group-id-b>"
+mode = "full-auto"
+model = "gpt-5.4-mini"
+reasoning_effort = "medium"
+
+[[projects.platforms]]
+type = "qq"
+
+[projects.platforms.options]
+ws_url = "ws://127.0.0.1:3004"
+token = ""
+allow_from = "*"
+share_session_in_channel = true
+
+[[projects]]
+name = "qq-sandbox-group-b-at"
+reset_on_idle_mins = 30
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-<group-id-b>"
+mode = "full-auto"
+model = "gpt-5.5"
+reasoning_effort = "high"
+
+[[projects.platforms]]
+type = "qq"
+
+[projects.platforms.options]
+ws_url = "ws://127.0.0.1:3005"
+token = ""
+allow_from = "*"
+share_session_in_channel = false

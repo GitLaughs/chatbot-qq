@@ -1,0 +1,44 @@
+# cc-connect QQ Bot config template.
+# Copy to configs/cc-connect.qqbot.local.toml and fill local secrets there.
+
+language = "zh"
+data_dir = "E:\\CHATBOT-QQ\\.cc-connect"
+
+[log]
+level = "info"
+
+[display]
+mode = "compact"
+thinking_messages = false
+tool_messages = true
+
+[stream_preview]
+enabled = false
+
+[rate_limit]
+max_messages = 20
+window_secs = 60
+
+[[projects]]
+name = "qqbot-main"
+reset_on_idle_mins = 30
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "E:\\CHATBOT-QQ\\groups\\default"
+mode = "full-auto"
+model = "gpt-5.4-mini"
+reasoning_effort = "medium"
+
+[[projects.platforms]]
+type = "qqbot"
+
+[projects.platforms.options]
+app_id = "${QQBOT_APP_ID}"
+app_secret = "${QQBOT_APP_SECRET}"
+sandbox = true
+allow_from = "*"
+share_session_in_channel = false
+markdown_support = false

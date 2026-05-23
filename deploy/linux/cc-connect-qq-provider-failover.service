@@ -1,0 +1,11 @@
+[Unit]
+Description=cc-connect QQ provider failover check
+After=network-online.target mimo-responses-proxy.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/chatbot-qq.env
+ExecStart=/usr/bin/python3 /opt/chatbot-qq/scripts/provider-failover.py
+StandardOutput=append:/var/log/cc-connect-qq-provider-failover.log
+StandardError=append:/var/log/cc-connect-qq-provider-failover.log

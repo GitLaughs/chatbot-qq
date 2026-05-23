@@ -1,0 +1,166 @@
+# Server cc-connect QQ config via NapCat / OneBot v11.
+# Copy to /root/.cc-connect-qq/config.toml or another isolated path.
+
+language = "zh"
+data_dir = "/opt/chatbot-qq/.cc-connect"
+
+[log]
+level = "info"
+
+[display]
+mode = "compact"
+thinking_messages = false
+tool_messages = false
+show_context_indicator = false
+reply_footer = false
+
+[stream_preview]
+enabled = false
+
+[instant_reply]
+enabled = false
+content = ""
+
+[rate_limit]
+max_messages = 20
+window_secs = 60
+
+[[projects]]
+name = "qq-sandbox-group-a-listen"
+reset_on_idle_mins = 30
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "/opt/chatbot-qq/groups/sandbox-<group-id-a>"
+mode = "full-auto"
+model = "gpt-5.4-mini"
+reasoning_effort = "medium"
+provider = "qq-opentoken"
+
+[[projects.agent.providers]]
+name = "qq-opentoken"
+api_key = "${QQ_OPENTOKEN_API_KEY}"
+base_url = "${QQ_OPENTOKEN_BASE_URL}"
+model = "gpt-5.4-mini"
+
+[[projects.agent.providers]]
+name = "qq-mimo-fallback"
+api_key = "${QQ_MIMO_PROXY_API_KEY}"
+base_url = "${QQ_MIMO_PROXY_BASE_URL}"
+model = "mimo-v2.5-pro"
+
+[[projects.platforms]]
+type = "qq"
+
+[projects.platforms.options]
+ws_url = "ws://127.0.0.1:3002"
+token = ""
+allow_from = "*"
+share_session_in_channel = true
+
+[[projects]]
+name = "qq-sandbox-group-a-at"
+reset_on_idle_mins = 30
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "/opt/chatbot-qq/groups/sandbox-<group-id-a>"
+mode = "full-auto"
+model = "gpt-5.5"
+reasoning_effort = "high"
+provider = "qq-opentoken"
+
+[[projects.agent.providers]]
+name = "qq-opentoken"
+api_key = "${QQ_OPENTOKEN_API_KEY}"
+base_url = "${QQ_OPENTOKEN_BASE_URL}"
+model = "gpt-5.5"
+
+[[projects.agent.providers]]
+name = "qq-mimo-fallback"
+api_key = "${QQ_MIMO_PROXY_API_KEY}"
+base_url = "${QQ_MIMO_PROXY_BASE_URL}"
+model = "mimo-v2.5-pro"
+
+[[projects.platforms]]
+type = "qq"
+
+[projects.platforms.options]
+ws_url = "ws://127.0.0.1:3003"
+token = ""
+allow_from = "*"
+share_session_in_channel = false
+
+[[projects]]
+name = "qq-sandbox-group-b-listen"
+reset_on_idle_mins = 30
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "/opt/chatbot-qq/groups/sandbox-<group-id-b>"
+mode = "full-auto"
+model = "gpt-5.4-mini"
+reasoning_effort = "medium"
+provider = "qq-opentoken"
+
+[[projects.agent.providers]]
+name = "qq-opentoken"
+api_key = "${QQ_OPENTOKEN_API_KEY}"
+base_url = "${QQ_OPENTOKEN_BASE_URL}"
+model = "gpt-5.4-mini"
+
+[[projects.agent.providers]]
+name = "qq-mimo-fallback"
+api_key = "${QQ_MIMO_PROXY_API_KEY}"
+base_url = "${QQ_MIMO_PROXY_BASE_URL}"
+model = "mimo-v2.5-pro"
+
+[[projects.platforms]]
+type = "qq"
+
+[projects.platforms.options]
+ws_url = "ws://127.0.0.1:3004"
+token = ""
+allow_from = "*"
+share_session_in_channel = true
+
+[[projects]]
+name = "qq-sandbox-group-b-at"
+reset_on_idle_mins = 30
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "/opt/chatbot-qq/groups/sandbox-<group-id-b>"
+mode = "full-auto"
+model = "gpt-5.5"
+reasoning_effort = "high"
+provider = "qq-opentoken"
+
+[[projects.agent.providers]]
+name = "qq-opentoken"
+api_key = "${QQ_OPENTOKEN_API_KEY}"
+base_url = "${QQ_OPENTOKEN_BASE_URL}"
+model = "gpt-5.5"
+
+[[projects.agent.providers]]
+name = "qq-mimo-fallback"
+api_key = "${QQ_MIMO_PROXY_API_KEY}"
+base_url = "${QQ_MIMO_PROXY_BASE_URL}"
+model = "mimo-v2.5-pro"
+
+[[projects.platforms]]
+type = "qq"
+
+[projects.platforms.options]
+ws_url = "ws://127.0.0.1:3005"
+token = ""
+allow_from = "*"
+share_session_in_channel = false
