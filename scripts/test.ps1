@@ -23,6 +23,8 @@ node --check scripts/onebot-group-proxy.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: onebot-group-proxy.js" }
 node --check scripts/generate-image.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: generate-image.js" }
+node --check scripts/render-qq-card-imagemagick.js
+if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: render-qq-card-imagemagick.js" }
 node --check scripts/test-onebot-proxy-units.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: test-onebot-proxy-units.js" }
 

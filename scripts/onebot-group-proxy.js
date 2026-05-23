@@ -64,6 +64,7 @@ const OUTGOING_RETRY_BASE_DELAY_MS = Math.max(200, Number(process.env.ONEBOT_OUT
 const WORKSPACE_ROOT = process.env.ONEBOT_WORKSPACE_ROOT || path.join(__dirname, "..", "groups");
 const PROXY_STATE_FILE = process.env.ONEBOT_PROXY_STATE_FILE || path.join(path.dirname(WORKSPACE_ROOT), ".cc-connect", "onebot-proxy-state.json");
 const RENDER_SCRIPT = process.env.ONEBOT_RENDER_SCRIPT || path.join(__dirname, "render-qq-card.ps1");
+const RENDER_IMAGEMAGICK_SCRIPT = process.env.ONEBOT_RENDER_IMAGEMAGICK_SCRIPT || path.join(__dirname, "render-qq-card-imagemagick.js");
 const DREAM_COMMAND_ENABLED = !["0", "false", "no"].includes(String(process.env.ONEBOT_DREAM_COMMAND_ENABLED || "1").toLowerCase());
 const DREAM_TRIGGERS = (process.env.ONEBOT_DREAM_TRIGGERS || "/dream,做梦")
   .split(",")
@@ -1660,19 +1661,46 @@ function renderAnswerImage(groupID, text) {
     const textPath = path.join(dir, `answer-${slug}.txt`);
     const imagePath = path.join(dir, `answer-${slug}.png`);
     fs.writeFileSync(textPath, renderForQQ(stripWorkspacePath(text)), "utf8");
+    renderCardImage(textPath, imagePath, `QQ Bot - ${groupID}`);
+    appendLine(path.join(workspace, "local_files", "INDEX.md"), `- ${new Date().toISOString()} 渲染答案图片: rendered/${path.basename(imagePath)}`);
+    return imagePath;
+  } catch (err) {
+    log("render image failed", err.message);
+    return null;
+  }
+}
+
+function renderCardImage(textPath, imagePath, title) {
+  if (process.platform === "win32" && commandExists("powershell.exe")) {
     execFileSync("powershell.exe", [
       "-NoProfile",
       "-ExecutionPolicy", "Bypass",
       "-File", RENDER_SCRIPT,
       "-TextPath", textPath,
       "-OutPath", imagePath,
-      "-Title", `QQ Bot - ${groupID}`
+      "-Title", title
     ], { timeout: 30000, windowsHide: true });
-    appendLine(path.join(workspace, "local_files", "INDEX.md"), `- ${new Date().toISOString()} 渲染答案图片: rendered/${path.basename(imagePath)}`);
-    return imagePath;
-  } catch (err) {
-    log("render image failed", err.message);
-    return null;
+    return;
+  }
+  if (commandExists(process.env.ONEBOT_IMAGEMAGICK_CONVERT || "convert")) {
+    execFileSync(process.execPath, [
+      RENDER_IMAGEMAGICK_SCRIPT,
+      "--text", textPath,
+      "--out", imagePath,
+      "--title", title
+    ], { timeout: 30000, windowsHide: true });
+    return;
+  }
+  throw new Error("no answer-image renderer available: install ImageMagick convert or provide powershell.exe");
+}
+
+function commandExists(command) {
+  try {
+    const checker = process.platform === "win32" ? "where.exe" : "which";
+    execFileSync(checker, [command], { stdio: "ignore", timeout: 3000, windowsHide: true });
+    return true;
+  } catch {
+    return false;
   }
 }
 

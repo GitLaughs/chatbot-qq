@@ -78,6 +78,9 @@ ONEBOT_HEALTH_PORT=3010
 ONEBOT_OUTGOING_RETRY_MAX=2
 ONEBOT_OUTGOING_RESPONSE_TIMEOUT_MS=12000
 ONEBOT_OUTGOING_RETRY_BASE_DELAY_MS=1200
+ONEBOT_RENDER_IMAGEMAGICK_SCRIPT=/opt/chatbot-qq/scripts/render-qq-card-imagemagick.js
+ONEBOT_IMAGEMAGICK_CONVERT=convert
+ONEBOT_RENDER_FONT=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
 ONEBOT_LISTEN_PORT=3002
 ONEBOT_AT_PORT=3003
 ONEBOT_PRIVATE_ROUTES=200000001:3006,200000002:3007,200000003:3008,200000004:3009
@@ -96,6 +99,14 @@ OPENAI_API_KEY=replace-me
 ```
 
 Install or start Linux NapCat separately. The bundled `tools/NapCat.Shell.Windows.OneKey` package is Windows-only.
+
+For formula-heavy or long answers, the proxy renders the answer into a PNG before sending it to QQ.
+On Ubuntu/Debian servers install the renderer dependencies:
+
+```bash
+apt-get update
+apt-get install -y imagemagick fonts-noto-cjk
+```
 
 If using Docker, start from:
 
@@ -154,10 +165,6 @@ Generate a machine-readable daily operations report:
 ```powershell
 .\scripts\get-chatbot-qq-health-report.ps1
 ```
-
-The report writes JSON snapshots under `backup\health-reports` and alert markers under `backup\health-alerts`.
-`ALERT.json` is updated on every run, `ACTIVE.txt` exists only while the latest report is failing, and timestamped alert text files keep a short failure history.
-Before reading status files, the report also refreshes the Linux integrity check and permission audit.
 
 Install the daily health report task. It runs after the default daily backup time:
 

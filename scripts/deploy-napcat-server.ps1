@@ -33,6 +33,12 @@ ssh $Server @"
 set -e
 test '$RemoteConfigDir' != '/root/.cc-connect'
 test '$RemoteDir' != '/opt/openclaw'
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y imagemagick fonts-noto-cjk
+else
+  echo 'WARN: apt-get not found; install ImageMagick and CJK fonts manually for Linux answer-image rendering' >&2
+fi
 mkdir -p '$RemoteDir' '$RemoteConfigDir'
 tar -xf /tmp/chatbot-qq-deploy.tar -C '$RemoteDir'
 rm -f /tmp/chatbot-qq-deploy.tar

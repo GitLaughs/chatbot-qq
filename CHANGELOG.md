@@ -7,6 +7,18 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-05-23
+
+### Added
+
+- Added a Linux ImageMagick-based answer renderer for long and formula-heavy QQ replies.
+- Documented ImageMagick and CJK font dependencies for server deployments.
+
+### Fixed
+
+- Fixed Linux deployments relying on Windows-only `powershell.exe` for answer-image rendering.
+- Fixed CJK text disappearing in the Linux render path by using ImageMagick caption rendering with an explicit Noto CJK font.
+
 ## [0.2.12] - 2026-05-23
 
 ### Added
