@@ -123,13 +123,15 @@ systemctl start onebot-group-proxy
 systemctl start cc-connect-qq
 ```
 
-The installed systemd units use a tighter sandbox than the first prototype:
+The installed systemd units use a bounded runtime profile, but it must not be tightened further without testing the bot's actual chat features:
 
-- `ProtectSystem=strict` with write access only to QQ runtime data.
+- `ProtectSystem=strict` with write access to the known QQ runtime data paths.
 - `NoNewPrivileges=true`, empty `CapabilityBoundingSet`, `PrivateTmp=true`.
 - `chatbot-qq-integrity-check.timer` checks code and deploy files against a SHA256 manifest every 30 minutes and writes `/var/lib/chatbot-qq-integrity/status.json`.
 - `chatbot-qq-permission-audit.sh --fix` tightens deployed code/config permissions and writes `/var/lib/chatbot-qq-integrity/permissions.json`.
 - `chatbot-qq-cleanup.timer` removes old logs and generated runtime artifacts daily with conservative retention defaults.
+
+Do not add stricter sandboxing, path denies, or network restrictions just for hardening. First verify `/status`, `/画像`, `/记住`, `/总结今天`, file/PDF handling, image generation, OneBot reconnect, and `cc-connect-qq` restart recovery in the real self-use group.
 
 On the first integrity run, the manifest is initialized under `/var/lib/chatbot-qq-integrity/sha256sums.txt`. After intentional deployment, remove that manifest or run the check once after updating it so the next baseline matches the new code.
 
