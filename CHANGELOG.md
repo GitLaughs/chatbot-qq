@@ -7,6 +7,12 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-23
+
+### Fixed
+
+- Added `go.sum` so GitHub Actions can run Go validation without missing module checksum annotations.
+
 ## [0.2.0] - 2026-05-23
 
 ### Added

@@ -1,6 +1,6 @@
-# chatbot-qq v0.2.0｜beginner installers and GitHub-ready docs
+# chatbot-qq v0.2.1｜beginner installers and checksum fix
 
-Packages beginner installation flows and public-facing repository polish for the QQ cc-connect adapter workspace.
+Packages beginner installation flows and public-facing repository polish for the QQ cc-connect adapter workspace, with Go module checksums included for CI.
 
 中文关键词：QQ 机器人、cc-connect QQ、NapCat、OneBot v11、QQ群机器人、QQ Bot、双路由、群聊工作区、做梦、画图、Linux 部署。
 
@@ -12,6 +12,7 @@ Packages beginner installation flows and public-facing repository polish for the
 - Refreshes README with badges, keywords, requirements, quick start, and clearer architecture context.
 - Adds GitHub release config, issue templates, PR template, and repository metadata guidance.
 - Sanitizes public examples so real group IDs, private user IDs, and placeholder keys stay out of the release.
+- Adds `go.sum` so Go validation runs cleanly on GitHub Actions.
 
 ## Install
 
