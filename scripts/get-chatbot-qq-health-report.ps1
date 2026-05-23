@@ -27,6 +27,17 @@ function Invoke-RemoteText($Command) {
     return ($output -join "`n")
 }
 
+function Invoke-RemoteResult($Name, $Command) {
+    $output = ssh $Server $Command 2>&1
+    return [ordered]@{
+        name = $Name
+        command = $Command
+        ok = $LASTEXITCODE -eq 0
+        exit_code = $LASTEXITCODE
+        output = @($output | Where-Object { $_ })
+    }
+}
+
 function Test-BackupStatus {
     $failures = New-Object System.Collections.Generic.List[string]
     $latest = Join-Path $LocalBackupDir "LATEST.json"
@@ -154,10 +165,23 @@ $report = [ordered]@{
     services = [ordered]@{}
     timers = [ordered]@{}
     proxy = [ordered]@{}
+    refresh = [ordered]@{}
     backup = [ordered]@{}
     failures = @()
 }
 $failures = New-Object System.Collections.Generic.List[string]
+
+$refreshChecks = @(
+    @{ name = "integrity"; command = "systemctl start chatbot-qq-integrity-check.service" },
+    @{ name = "permissions"; command = "/opt/chatbot-qq/deploy/linux/chatbot-qq-permission-audit.sh --fix" }
+)
+foreach ($check in $refreshChecks) {
+    $result = Invoke-RemoteResult $check.name $check.command
+    $report.refresh[$check.name] = $result
+    if (-not $result.ok) {
+        $failures.Add("refresh $($check.name) failed: exit $($result.exit_code)") | Out-Null
+    }
+}
 
 $serviceNames = @("cc-connect", "onebot-group-proxy", "cc-connect-qq", "chatbot-qq-integrity-check.timer", "chatbot-qq-cleanup.timer")
 foreach ($name in $serviceNames) {

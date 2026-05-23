@@ -7,6 +7,13 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-05-23
+
+### Changed
+
+- Operations health reports now refresh server-side integrity and permission checks before reading status files.
+- Permission audits run with repair enabled during health report refresh so minor permission drift is corrected before reporting.
+
 ## [0.2.9] - 2026-05-23
 
 ### Added
