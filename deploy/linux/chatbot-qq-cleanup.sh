@@ -10,7 +10,7 @@ LOG="/var/log/chatbot-qq-cleanup.log"
 touch "$LOG"
 echo "$(date -Is) cleanup start root=$ROOT" >> "$LOG"
 
-find /var/log \
+find /var/log -maxdepth 1 \
   \( -name 'onebot-group-proxy.log*' -o -name 'cc-connect-qq.log*' -o -name 'chatbot-qq-*.log*' \) \
   -type f -mtime +"$LOG_KEEP_DAYS" -print -delete >> "$LOG" 2>&1 || true
 

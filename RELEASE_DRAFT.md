@@ -1,15 +1,16 @@
-# chatbot-qq v0.2.3｜file archive observability
+# chatbot-qq v0.2.4｜metrics and backup status
 
-This release continues the production-hardening pass by separating group file upload handling from the main OneBot proxy and adding health visibility for the archive pipeline.
+This release adds lightweight operational visibility for the QQ proxy and local server backups.
 
-中文关键词：QQ 文件上传、群文件归档、OneBot 代理、健康检查、文件解析、cc-connect QQ。
+中文关键词：QQ 机器人监控、Prometheus metrics、健康检查、本地自动备份、Linux 清理任务、cc-connect QQ。
 
 ## Highlights
 
-- Adds `scripts/lib/proxy-files.js` for group upload download requests, archive saving, sidecar metadata, extracted text, and archive notices.
-- Exposes file-processing counters in `/healthz` under `files`.
-- Keeps the main proxy focused on routing and response handling instead of file-storage details.
-- Adds unit checks for group upload download requests and text-file archive extraction.
+- Adds `/metrics` next to `/healthz` and `/readyz` for Prometheus-style counters.
+- Exposes upstream readiness, port connectivity, pending queues, file archive counters, listen queues, and image job counters.
+- Writes `LATEST.json` after each local server backup with archive path, size, timestamp, server, and SHA256.
+- Shows local backup status from `scripts/check-napcat-server.ps1`.
+- Limits cleanup log pruning to top-level QQ log files under `/var/log`, avoiding unrelated system log directory permission noise.
 
 ## Verify
 
@@ -19,17 +20,17 @@ npm test
 git diff --check
 ```
 
-Expected:
+Runtime checks:
 
-- Go package checks pass when dependencies are reachable.
-- Node syntax checks pass.
-- OneBot proxy unit checks pass, including file archive checks.
-- PowerShell parser checks pass.
-- Sensitive local-data scan passes.
+```bash
+curl -fsS http://127.0.0.1:3010/metrics
+curl -fsS http://127.0.0.1:3010/healthz
+```
 
 ## Deployment Notes
 
-- The proxy health response now includes file counters such as `group_uploads`, `archived`, `parse_success`, and `parse_failed`.
+- `/metrics` is bound to the same local health host as `/healthz`; keep it on localhost unless you intentionally front it with an authenticated monitor.
+- Backup status is written beside backup archives as `LATEST.json`.
 - Real QQ group IDs, private user IDs, API keys, and NapCat tokens must stay in ignored local files or `/etc/chatbot-qq.env`.
 
 ## Full Changelog

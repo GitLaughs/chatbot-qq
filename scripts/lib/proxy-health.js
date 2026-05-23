@@ -68,6 +68,12 @@ function startHealthServer({ host, port, snapshot, log }) {
     return null;
   }
   const server = http.createServer((req, res) => {
+    if (req.url === "/metrics") {
+      const body = snapshot();
+      res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" });
+      res.end(createMetricsText(body));
+      return;
+    }
     if (req.url !== "/healthz" && req.url !== "/readyz") {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "not found" }));
@@ -85,7 +91,50 @@ function startHealthServer({ host, port, snapshot, log }) {
   return server;
 }
 
+function createMetricsText(snapshot) {
+  const lines = [];
+  const metric = (name, value, labels) => {
+    const labelText = labels && Object.keys(labels).length
+      ? `{${Object.entries(labels).map(([key, val]) => `${key}="${escapeLabel(val)}"`).join(",")}}`
+      : "";
+    lines.push(`${name}${labelText} ${Number(value) || 0}`);
+  };
+
+  metric("chatbot_qq_up", snapshot.ok ? 1 : 0);
+  metric("chatbot_qq_upstream_ready", snapshot.upstream && snapshot.upstream.ready ? 1 : 0);
+  for (const [port, connected] of Object.entries(snapshot.ports || {})) {
+    metric("chatbot_qq_port_connected", connected ? 1 : 0, { port });
+  }
+  for (const port of snapshot.required_ports || []) {
+    metric("chatbot_qq_required_port", 1, { port });
+  }
+  for (const [key, value] of Object.entries(snapshot.pending || {})) {
+    metric(`chatbot_qq_pending_${sanitizeMetricPart(key)}`, value);
+  }
+  for (const [key, value] of Object.entries(snapshot.files || {})) {
+    metric(`chatbot_qq_files_${sanitizeMetricPart(key)}`, value);
+  }
+  for (const [groupID, state] of Object.entries(snapshot.listen || {})) {
+    metric("chatbot_qq_listen_busy", state.busy ? 1 : 0, { group: groupID });
+    metric("chatbot_qq_listen_queued", state.queued || 0, { group: groupID });
+  }
+  for (const [key, state] of Object.entries(snapshot.image_jobs || {})) {
+    metric("chatbot_qq_image_active", state.active || 0, { key });
+    metric("chatbot_qq_image_queued", state.queued || 0, { key });
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function sanitizeMetricPart(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase();
+}
+
+function escapeLabel(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+}
+
 module.exports = {
   createHealthSnapshot,
-  startHealthServer
+  startHealthServer,
+  createMetricsText
 };

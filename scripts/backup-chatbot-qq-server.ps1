@@ -1,5 +1,5 @@
 param(
-    [string]$Server = "root@43.108.37.203",
+    [string]$Server = "root@203.0.113.10",
     [string]$RemoteDir = "/opt/chatbot-qq",
     [string]$RemoteConfigDir = "/root/.cc-connect-qq",
     [string]$LocalBackupDir = "E:\CHATBOT-QQ\backup\server-daily",
@@ -30,6 +30,7 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $remoteArchive = "/tmp/chatbot-qq-backup-$stamp.tar.gz"
 $localArchive = Join-Path $LocalBackupDir "chatbot-qq-server-$stamp.tar.gz"
 $manifest = Join-Path $LocalBackupDir "MANIFEST-$stamp.txt"
+$latestStatus = Join-Path $LocalBackupDir "LATEST.json"
 $secretArgs = if ($IncludeSecrets) { "/etc/chatbot-qq.env '$RemoteConfigDir/config.toml'" } else { "" }
 
 ssh $Server @"
@@ -59,18 +60,31 @@ scp "${Server}:$remoteArchive" $localArchive
 ssh $Server "rm -f '$remoteArchive'"
 
 $hash = Get-FileHash -Algorithm SHA256 -Path $localArchive
+$status = [ordered]@{
+    time = (Get-Date).ToString('o')
+    server = $Server
+    remote_dir = $RemoteDir
+    include_secrets = [bool]$IncludeSecrets
+    archive = $localArchive
+    bytes = (Get-Item -LiteralPath $localArchive).Length
+    sha256 = $hash.Hash
+}
 @(
-    "time=$((Get-Date).ToString('o'))"
+    "time=$($status.time)"
     "server=$Server"
     "remote_dir=$RemoteDir"
     "include_secrets=$IncludeSecrets"
     "archive=$localArchive"
+    "bytes=$($status.bytes)"
     "sha256=$($hash.Hash)"
 ) | Set-Content -Path $manifest -Encoding UTF8
+
+$status | ConvertTo-Json | Set-Content -Path $latestStatus -Encoding UTF8
 
 Get-ChildItem -Path $LocalBackupDir -Filter "chatbot-qq-server-*.tar.gz" |
     Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
     Remove-Item -Force
 
 Write-Host "Backup saved: $localArchive"
+Write-Host "Bytes: $($status.bytes)"
 Write-Host "SHA256: $($hash.Hash)"

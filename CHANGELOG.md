@@ -7,6 +7,18 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-05-23
+
+### Added
+
+- Added a Prometheus-style `/metrics` endpoint for QQ proxy health counters.
+- Added `LATEST.json` backup status output for local server backup runs.
+- Added local backup status output to the server check script.
+
+### Fixed
+
+- Limited cleanup log pruning to top-level QQ log files under `/var/log` to avoid sandbox permission noise from unrelated system log directories.
+
 ## [0.2.3] - 2026-05-23
 
 ### Added

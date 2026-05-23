@@ -2,7 +2,7 @@ const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { createHealthSnapshot } = require("./lib/proxy-health");
+const { createHealthSnapshot, createMetricsText } = require("./lib/proxy-health");
 const { createProxyCommands } = require("./lib/proxy-commands");
 const { createProxyFiles } = require("./lib/proxy-files");
 
@@ -38,6 +38,25 @@ function testAtOnlyRequiredPorts() {
   assert.deepStrictEqual(snapshot.required_ports, [3002, 3003, 3005, 3006]);
   assert.strictEqual(Object.prototype.hasOwnProperty.call(snapshot.ports, "3004"), false);
   assert.strictEqual(snapshot.ok, true);
+}
+
+function testMetricsTextIncludesOperationalCounters() {
+  const text = createMetricsText({
+    ok: true,
+    upstream: { ready: true },
+    ports: { 3002: true, 3005: true },
+    required_ports: [3002, 3005],
+    pending: { upstream_queue: 2, file_downloads: 1 },
+    files: { group_uploads: 3, parse_failed: 1 },
+    listen: { "17***04": { busy: false, queued: 0 } },
+    image_jobs: { "group:17***04": { active: 1, queued: 2 } }
+  });
+
+  assert.match(text, /chatbot_qq_up 1/);
+  assert.match(text, /chatbot_qq_port_connected\{port="3002"\} 1/);
+  assert.match(text, /chatbot_qq_pending_file_downloads 1/);
+  assert.match(text, /chatbot_qq_files_group_uploads 3/);
+  assert.match(text, /chatbot_qq_files_parse_failed 1/);
 }
 
 function testAtOnlyModeCommandCannotEnableAll() {
@@ -183,6 +202,7 @@ async function waitFor(predicate) {
 }
 
 testAtOnlyRequiredPorts();
+testMetricsTextIncludesOperationalCounters();
 testAtOnlyModeCommandCannotEnableAll();
 testGroupUploadRequestsDownload();
 testGroupFileDownloadArchivesText().then(() => {

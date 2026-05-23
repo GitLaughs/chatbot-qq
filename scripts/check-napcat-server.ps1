@@ -1,5 +1,6 @@
 param(
-    [string]$Server = "root@43.108.37.203"
+    [string]$Server = "root@203.0.113.10",
+    [string]$LocalBackupDir = "E:\CHATBOT-QQ\backup\server-daily"
 )
 
 $ErrorActionPreference = "Continue"
@@ -33,3 +34,12 @@ tail -n 80 /var/log/cc-connect-qq.log 2>/dev/null || true
 tail -n 20 /var/log/chatbot-qq-integrity.log 2>/dev/null || true
 tail -n 20 /var/log/chatbot-qq-cleanup.log 2>/dev/null || true
 '@
+
+Write-Host
+Write-Host "== Local backup status =="
+$latest = Join-Path $LocalBackupDir "LATEST.json"
+if (Test-Path $latest) {
+    Get-Content -Raw -Path $latest
+} else {
+    Write-Host "No LATEST.json found under $LocalBackupDir"
+}
