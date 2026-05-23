@@ -633,7 +633,7 @@ function normalizeVisualMessage(msg) {
   if (!msg || msg.post_type !== "message") {
     return msg;
   }
-  const segments = Array.isArray(msg.message) ? msg.message : [];
+  const segments = messageSegments(msg);
   if (segments.length === 0) {
     return msg;
   }
@@ -688,7 +688,7 @@ function normalizeVisualSegments(segments) {
 function normalizeImageSegment(seg) {
   const data = { ...(seg.data || {}) };
   const source = data.url || data.file || data.path;
-  if (source && !data.file) {
+  if (source) {
     data.file = source;
   }
   return { ...seg, data };
@@ -710,7 +710,7 @@ function quotedVisualSegments(msg) {
   if (!reply) {
     return [];
   }
-  const segments = Array.isArray(reply.message) ? reply.message : [];
+  const segments = messageSegments(reply);
   if (segments.length > 0) {
     return normalizeVisualSegments(segments).filter((seg) => seg.type !== "reply");
   }
@@ -865,7 +865,7 @@ function senderName(msg) {
 }
 
 function messageText(msg) {
-  const segments = Array.isArray(msg.message) ? msg.message : [];
+  const segments = messageSegments(msg);
   if (typeof msg.raw_message === "string" && msg.raw_message.trim() && !rawMessageHasCQVisual(msg.raw_message, segments)) {
     return msg.raw_message.trim();
   }
@@ -879,6 +879,68 @@ function messageText(msg) {
 
 function rawMessageHasCQVisual(raw, segments) {
   return Array.isArray(segments) && segments.length > 0 && /\[CQ:(image|mface|face|bface|marketface)\b/i.test(String(raw || ""));
+}
+
+function messageSegments(msg) {
+  if (!msg) {
+    return [];
+  }
+  if (Array.isArray(msg.message)) {
+    return msg.message;
+  }
+  const raw = typeof msg.message === "string" ? msg.message : msg.raw_message;
+  if (typeof raw === "string" && /\[CQ:/i.test(raw)) {
+    return parseCQMessageSegments(raw);
+  }
+  return [];
+}
+
+function parseCQMessageSegments(raw) {
+  const text = String(raw || "");
+  const result = [];
+  const cqPattern = /\[CQ:([a-zA-Z0-9_-]+)((?:,[^\]]*)?)\]/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = cqPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      result.push({ type: "text", data: { text: decodeCQText(text.slice(lastIndex, match.index)) } });
+    }
+    result.push({
+      type: match[1],
+      data: parseCQData(match[2] || "")
+    });
+    lastIndex = cqPattern.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    result.push({ type: "text", data: { text: decodeCQText(text.slice(lastIndex)) } });
+  }
+  return result;
+}
+
+function parseCQData(rawParams) {
+  const data = {};
+  const params = String(rawParams || "").replace(/^,/, "");
+  if (!params) {
+    return data;
+  }
+  for (const pair of params.split(",")) {
+    const index = pair.indexOf("=");
+    if (index <= 0) {
+      continue;
+    }
+    const key = pair.slice(0, index);
+    const value = pair.slice(index + 1);
+    data[key] = decodeCQText(value);
+  }
+  return data;
+}
+
+function decodeCQText(text) {
+  return String(text || "")
+    .replace(/&#91;/g, "[")
+    .replace(/&#93;/g, "]")
+    .replace(/&#44;/g, ",")
+    .replace(/&amp;/g, "&");
 }
 
 function messageTextFromSegments(segments) {

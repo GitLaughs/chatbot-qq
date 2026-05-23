@@ -1,16 +1,15 @@
-# chatbot-qq v0.2.15｜cc-connect QQ service startup hardening
+# chatbot-qq v0.2.17｜QQ group image and sticker recognition
 
-This release removes the noisy systemd startup warning from the QQ cc-connect service and makes port waiting easier to validate.
+This release fixes a OneBot/NapCat compatibility path where group images or sticker packages could arrive only as raw CQ message text and fail to reach the agent as visual segments.
 
-中文关键词：QQ 群机器人、systemd、Linux 防御、服务启动、OneBot 端口等待、cc-connect QQ。
+中文关键词：QQ 群机器人、图片识别、表情包识别、OneBot、NapCat、CQ 码。
 
 ## Highlights
 
-- Adds `deploy/linux/wait-onebot-ports.sh` for waiting on configured OneBot proxy ports before starting `cc-connect`.
-- Changes `cc-connect-qq.service` to call that script instead of embedding Bash arrays directly in `ExecStartPre`.
-- Fixes repeated `ports[@]` systemd environment-variable warnings during service startup.
-- Adds release-test shell syntax checks when a usable Bash is available.
-- Keeps Windows release tests from failing on the built-in WSL launcher when no usable Linux environment exists.
+- Parses raw CQ `image`, `mface`, `marketface`, `bface`, and `face` segments when no structured message array is present.
+- Converts image-like sticker packages with URLs into image segments so the agent can inspect them.
+- Prefers usable image URLs for forwarded image file sources.
+- Adds unit coverage for raw CQ image and sticker normalization.
 
 ## Verify
 
@@ -21,17 +20,14 @@ git diff --check
 
 Server-side validation:
 
-- `bash -n /opt/chatbot-qq/deploy/linux/wait-onebot-ports.sh`
-- `systemd-analyze verify /etc/systemd/system/cc-connect-qq.service`
-- Restart `cc-connect-qq.service` and confirm recent logs no longer include `ports[@]`.
-- `http://127.0.0.1:3010/healthz` returns HTTP 200.
+- `node --check scripts/onebot-group-proxy.js`
+- `node --check scripts/test-onebot-proxy-units.js`
+- `npm test`
+- Restart `onebot-group-proxy` and `cc-connect-qq`.
+- Confirm the local health endpoint returns HTTP 200.
 
 ## Deployment Notes
 
-- Deploy `deploy/linux/wait-onebot-ports.sh` and `deploy/linux/cc-connect-qq.service`.
-- Run `chmod 755 /opt/chatbot-qq/deploy/linux/wait-onebot-ports.sh`, `systemctl daemon-reload`, then restart `cc-connect-qq.service`.
-- Real server addresses, QQ IDs, and API keys must stay in ignored local files or operator-provided command arguments.
-
-## Full Changelog
-
-See `CHANGELOG.md`.
+- Deploy `scripts/onebot-group-proxy.js` and `scripts/test-onebot-proxy-units.js`.
+- After production deployment, refresh the server integrity manifest for these two files and run the integrity check.
+- Real server addresses, QQ IDs, and API keys must stay in ignored local files or operator-provided environment variables.

@@ -7,6 +7,14 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-05-23
+
+### Fixed
+
+- Added raw CQ message parsing fallback so group images and sticker packages are still forwarded as visual segments when OneBot/NapCat sends only `message`/`raw_message` text.
+- Prefer image URLs as the forwarded image file source while preserving the original CQ fields.
+- Covered raw CQ image and sticker normalization in OneBot proxy unit tests.
+
 ## [0.2.15] - 2026-05-23
 
 ### Added

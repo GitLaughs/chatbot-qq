@@ -126,6 +126,24 @@ function testQuotedImageIsForwardedWhenUserRepliesToImage() {
   assert.match(normalized.raw_message, /引用图片/);
 }
 
+function testRawCQImageAndStickerAreNormalized() {
+  const msg = {
+    post_type: "message",
+    message_type: "group",
+    group_id: 100000001,
+    user_id: 1,
+    message_id: 4,
+    raw_message: "看看这个[CQ:image,file=abc.jpg,url=http://example/raw.png][CQ:mface,url=http://example/sticker.webp,summary=点头]",
+    message: "看看这个[CQ:image,file=abc.jpg,url=http://example/raw.png][CQ:mface,url=http://example/sticker.webp,summary=点头]"
+  };
+  const enriched = enrichMessageForAgent(msg);
+
+  assert.ok(enriched.message.some((seg) => seg.type === "image" && seg.data.file === "http://example/raw.png"));
+  assert.ok(enriched.message.some((seg) => seg.type === "image" && seg.data.file === "http://example/sticker.webp"));
+  assert.match(messageText(msg), /看看这个\[图片\]\[表情包:点头\]/);
+  assert.doesNotMatch(messageText(msg), /\[CQ:image/);
+}
+
 function testInvalidProxyStateIsQuarantinedAndReset() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-state-"));
   const file = path.join(temp, "onebot-proxy-state.json");
@@ -354,6 +372,7 @@ testLatexDisplayDelimitersRenderAsImageAndCleanText();
 testProfileContextPreservesImageSegment();
 testMfaceIsNormalizedToImageWhenUrlExists();
 testQuotedImageIsForwardedWhenUserRepliesToImage();
+testRawCQImageAndStickerAreNormalized();
 testInvalidProxyStateIsQuarantinedAndReset();
 testAtOnlyModeCommandCannotEnableAll();
 testProfileCommandShowsGroupAndMemberFacts();
