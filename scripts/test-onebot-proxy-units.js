@@ -6,7 +6,7 @@ const { createHealthSnapshot, createMetricsText } = require("./lib/proxy-health"
 const { createProxyCommands } = require("./lib/proxy-commands");
 const { createProxyFiles } = require("./lib/proxy-files");
 const { loadProxyState } = require("./lib/proxy-state");
-const { shouldRenderAsImage, renderForQQ } = require("./onebot-group-proxy");
+const { shouldRenderAsImage, renderForQQ, enrichMessageForAgent, messageText, normalizeVisualSegments } = require("./onebot-group-proxy");
 
 function testAtOnlyRequiredPorts() {
   const clients = new Map([[3002, {}], [3003, {}], [3005, {}], [3006, {}]]);
@@ -68,6 +68,62 @@ function testLatexDisplayDelimitersRenderAsImageAndCleanText() {
   assert.match(cleaned, /金融\/会计\/投行就业/);
   assert.doesNotMatch(cleaned, /\\\[/);
   assert.doesNotMatch(cleaned, /\\\]/);
+}
+
+function testProfileContextPreservesImageSegment() {
+  const msg = {
+    post_type: "message",
+    message_type: "group",
+    group_id: 100000001,
+    user_id: 1,
+    message_id: 2,
+    raw_message: "[CQ:at,qq=3209859433] 评价一下 [CQ:image,file=abc.jpg,url=http://example/image.jpg]",
+    message: [
+      { type: "at", data: { qq: "3209859433" } },
+      { type: "text", data: { text: " 评价一下 " } },
+      { type: "image", data: { file: "abc.jpg", url: "http://example/image.jpg" } }
+    ]
+  };
+  const enriched = enrichMessageForAgent(msg);
+
+  assert.ok(enriched.message.some((seg) => seg.type === "image"));
+  assert.match(enriched.raw_message, /评价一下/);
+  assert.doesNotMatch(messageText(msg), /\[CQ:image/);
+  assert.match(messageText(msg), /评价一下 \[图片\]/);
+}
+
+function testMfaceIsNormalizedToImageWhenUrlExists() {
+  const segments = normalizeVisualSegments([
+    { type: "text", data: { text: "看看" } },
+    { type: "mface", data: { url: "http://example/sticker.webp", summary: "拍桌" } }
+  ]);
+
+  assert.ok(segments.some((seg) => seg.type === "image" && seg.data.file === "http://example/sticker.webp"));
+  assert.ok(segments.some((seg) => seg.type === "text" && /表情包:拍桌/.test(seg.data.text)));
+}
+
+function testQuotedImageIsForwardedWhenUserRepliesToImage() {
+  const msg = {
+    post_type: "message",
+    message_type: "group",
+    group_id: 100000001,
+    user_id: 1,
+    message_id: 3,
+    raw_message: "[CQ:reply,id=2] 评价一下这个",
+    message: [
+      { type: "reply", data: { id: "2" } },
+      { type: "text", data: { text: "评价一下这个" } }
+    ],
+    reply: {
+      message: [
+        { type: "image", data: { url: "http://example/quoted.png" } }
+      ]
+    }
+  };
+  const normalized = enrichMessageForAgent(msg);
+
+  assert.ok(normalized.message.some((seg) => seg.type === "image" && seg.data.file === "http://example/quoted.png"));
+  assert.match(normalized.raw_message, /引用图片/);
 }
 
 function testInvalidProxyStateIsQuarantinedAndReset() {
@@ -295,6 +351,9 @@ async function waitFor(predicate) {
 testAtOnlyRequiredPorts();
 testMetricsTextIncludesOperationalCounters();
 testLatexDisplayDelimitersRenderAsImageAndCleanText();
+testProfileContextPreservesImageSegment();
+testMfaceIsNormalizedToImageWhenUrlExists();
+testQuotedImageIsForwardedWhenUserRepliesToImage();
 testInvalidProxyStateIsQuarantinedAndReset();
 testAtOnlyModeCommandCannotEnableAll();
 testProfileCommandShowsGroupAndMemberFacts();

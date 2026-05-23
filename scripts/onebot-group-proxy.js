@@ -604,23 +604,145 @@ function enrichMessageForAgent(msg) {
   if (!msg || msg.post_type !== "message") {
     return msg;
   }
+  const normalized = normalizeVisualMessage(msg);
   const context = profileContextForMessage(msg);
   if (!context) {
-    return msg;
+    return normalized;
   }
-  const original = messageText(msg);
+  const original = messageText(normalized);
   const enrichedText = [
     "【QQ上下文，仅供回复参考，不要复述】",
     context,
     "",
-    "【用户消息】",
-    original
+    "【用户消息】"
   ].join("\n");
+  const originalSegments = Array.isArray(normalized.message) && normalized.message.length > 0
+    ? normalized.message
+    : [{ type: "text", data: { text: original } }];
+  return {
+    ...normalized,
+    raw_message: `${enrichedText}\n${original}`.trim(),
+    message: [
+      { type: "text", data: { text: `${enrichedText}\n` } },
+      ...originalSegments
+    ]
+  };
+}
+
+function normalizeVisualMessage(msg) {
+  if (!msg || msg.post_type !== "message") {
+    return msg;
+  }
+  const segments = Array.isArray(msg.message) ? msg.message : [];
+  if (segments.length === 0) {
+    return msg;
+  }
+  let nextSegments = normalizeVisualSegments(segments);
+  const quoted = quotedVisualSegments(msg);
+  if (quoted.length > 0 && !hasVisualSegment(nextSegments)) {
+    nextSegments = [
+      ...nextSegments,
+      { type: "text", data: { text: "\n【引用图片/表情】" } },
+      ...quoted
+    ];
+  }
   return {
     ...msg,
-    raw_message: enrichedText,
-    message: [{ type: "text", data: { text: enrichedText } }]
+    message: nextSegments,
+    raw_message: messageTextFromSegments(nextSegments) || msg.raw_message || ""
   };
+}
+
+function normalizeVisualSegments(segments) {
+  const result = [];
+  for (const seg of segments || []) {
+    if (!seg || !seg.type) {
+      continue;
+    }
+    if (seg.type === "image") {
+      result.push(normalizeImageSegment(seg));
+      continue;
+    }
+    if (seg.type === "mface" || seg.type === "marketface" || seg.type === "bface") {
+      const image = imageSegmentFromData(seg.data);
+      if (image) {
+        const summary = stickerSummary(seg);
+        if (summary) {
+          result.push({ type: "text", data: { text: summary } });
+        }
+        result.push(image);
+      } else {
+        result.push({ type: "text", data: { text: stickerSummary(seg) || "[表情包]" } });
+      }
+      continue;
+    }
+    if (seg.type === "face") {
+      result.push({ type: "text", data: { text: faceSummary(seg) } });
+      continue;
+    }
+    result.push(seg);
+  }
+  return result;
+}
+
+function normalizeImageSegment(seg) {
+  const data = { ...(seg.data || {}) };
+  const source = data.url || data.file || data.path;
+  if (source && !data.file) {
+    data.file = source;
+  }
+  return { ...seg, data };
+}
+
+function imageSegmentFromData(data) {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+  const source = data.url || data.file || data.path || data.image || data.image_url || data.preview || data.thumb;
+  if (!source) {
+    return null;
+  }
+  return { type: "image", data: { ...data, file: source } };
+}
+
+function quotedVisualSegments(msg) {
+  const reply = msg && msg.reply;
+  if (!reply) {
+    return [];
+  }
+  const segments = Array.isArray(reply.message) ? reply.message : [];
+  if (segments.length > 0) {
+    return normalizeVisualSegments(segments).filter((seg) => seg.type !== "reply");
+  }
+  if (typeof reply.raw_message === "string" && /\[CQ:(image|mface|face|bface|marketface)\b/i.test(reply.raw_message)) {
+    return [{ type: "text", data: { text: cqVisualSummary(reply.raw_message) } }];
+  }
+  return [];
+}
+
+function hasVisualSegment(segments) {
+  return (segments || []).some((seg) =>
+    seg && (seg.type === "image" || seg.type === "mface" || seg.type === "marketface" || seg.type === "bface")
+  );
+}
+
+function stickerSummary(seg) {
+  const data = (seg && seg.data) || {};
+  const text = data.summary || data.text || data.name || data.id || data.emoji_id || "";
+  return text ? `[表情包:${text}]` : "[表情包]";
+}
+
+function faceSummary(seg) {
+  const data = (seg && seg.data) || {};
+  const id = data.id || data.qq || data.face_id || "";
+  return id ? `[QQ表情:${id}]` : "[QQ表情]";
+}
+
+function cqVisualSummary(raw) {
+  return String(raw || "")
+    .replace(/\[CQ:image[^\]]*\]/gi, "[图片]")
+    .replace(/\[CQ:(mface|bface|marketface)[^\]]*\]/gi, "[表情包]")
+    .replace(/\[CQ:face[^\]]*\]/gi, "[QQ表情]");
 }
 
 function profileContextForMessage(msg) {
@@ -743,22 +865,32 @@ function senderName(msg) {
 }
 
 function messageText(msg) {
-  if (typeof msg.raw_message === "string" && msg.raw_message.trim()) {
+  const segments = Array.isArray(msg.message) ? msg.message : [];
+  if (typeof msg.raw_message === "string" && msg.raw_message.trim() && !rawMessageHasCQVisual(msg.raw_message, segments)) {
     return msg.raw_message.trim();
   }
 
-  const segments = Array.isArray(msg.message) ? msg.message : [];
   if (segments.length === 0 && typeof msg.message === "string") {
     return msg.message.trim();
   }
 
+  return messageTextFromSegments(segments) || "[非文本消息]";
+}
+
+function rawMessageHasCQVisual(raw, segments) {
+  return Array.isArray(segments) && segments.length > 0 && /\[CQ:(image|mface|face|bface|marketface)\b/i.test(String(raw || ""));
+}
+
+function messageTextFromSegments(segments) {
   return segments.map((seg) => {
     if (!seg || !seg.type) return "";
     if (seg.type === "text") return String((seg.data && seg.data.text) || "");
     if (seg.type === "image") return "[图片]";
+    if (seg.type === "mface" || seg.type === "marketface" || seg.type === "bface") return stickerSummary(seg);
+    if (seg.type === "face") return faceSummary(seg);
     if (seg.type === "at") return `[@${(seg.data && seg.data.qq) || ""}]`;
     return `[${seg.type}]`;
-  }).join("").trim() || "[非文本消息]";
+  }).join("").trim();
 }
 
 function ackMessage(msg) {
@@ -1992,7 +2124,7 @@ function recordGroupMessage(msg) {
     user_id: String(msg.user_id || ""),
     sender: msg.sender || {},
     text: messageText(msg),
-    has_image: Array.isArray(msg.message) && msg.message.some((seg) => seg && seg.type === "image"),
+    has_image: Array.isArray(msg.message) && hasVisualSegment(msg.message),
     raw_message: msg.raw_message || ""
   };
   appendLine(path.join(workspace, "memory", `chat-${todayLocal()}.jsonl`), JSON.stringify(record));
@@ -2007,7 +2139,7 @@ function recordPrivateMessage(msg) {
     user_id: String(msg.user_id || ""),
     sender: msg.sender || {},
     text: messageText(msg),
-    has_image: Array.isArray(msg.message) && msg.message.some((seg) => seg && seg.type === "image"),
+    has_image: Array.isArray(msg.message) && hasVisualSegment(msg.message),
     raw_message: msg.raw_message || ""
   };
   appendLine(path.join(workspace, "memory", `chat-${todayLocal()}.jsonl`), JSON.stringify(record));
@@ -2363,5 +2495,9 @@ if (require.main === module) {
 
 module.exports = {
   shouldRenderAsImage,
-  renderForQQ
+  renderForQQ,
+  enrichMessageForAgent,
+  messageText,
+  normalizeVisualMessage,
+  normalizeVisualSegments
 };
