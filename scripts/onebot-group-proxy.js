@@ -24,7 +24,7 @@ try {
   WebSocket = require(wsPath);
 }
 
-const LISTEN_PORTS = (process.env.ONEBOT_PROXY_PORTS || process.env.ONEBOT_PROXY_PORT || "3002,3003,3004,3005")
+const LISTEN_PORTS = (process.env.ONEBOT_PROXY_PORTS || process.env.ONEBOT_PROXY_PORT || "3002,3003,3004,3005,3006")
   .split(",")
   .map((p) => Number(p.trim()))
   .filter(Boolean);
@@ -33,9 +33,14 @@ const ALLOWED_GROUPS = (process.env.ONEBOT_ALLOWED_GROUPS || process.env.ONEBOT_
   .split(",")
   .map((p) => Number(p.trim()))
   .filter(Boolean);
+const ALLOWED_PRIVATE_USERS = (process.env.ONEBOT_ALLOWED_PRIVATE_USERS || "")
+  .split(",")
+  .map((p) => Number(p.trim()))
+  .filter(Boolean);
 const LISTEN_PORT = Number(process.env.ONEBOT_LISTEN_PORT || 3002);
 const AT_PORT = Number(process.env.ONEBOT_AT_PORT || 3003);
 const GROUP_ROUTES = parseGroupRoutes(process.env.ONEBOT_GROUP_ROUTES);
+const PRIVATE_ROUTES = parsePrivateRoutes(process.env.ONEBOT_PRIVATE_ROUTES);
 const ACK_EMOJI_ID = String(process.env.ONEBOT_ACK_EMOJI_ID || "76");
 const LISTEN_RELEASE_DELAY_MS = Number(process.env.ONEBOT_LISTEN_RELEASE_DELAY_MS || 1500);
 const LISTEN_BUSY_TIMEOUT_MS = Number(process.env.ONEBOT_LISTEN_BUSY_TIMEOUT_MS || 180000);
@@ -55,13 +60,14 @@ const IMAGE_SCRIPT = process.env.ONEBOT_IMAGE_SCRIPT || path.join(__dirname, "ge
 const LISTEN_TRIGGER_MODE = String(process.env.ONEBOT_LISTEN_TRIGGER_MODE || "selective").toLowerCase();
 const LISTEN_TRIGGER_KEYWORDS = (process.env.ONEBOT_LISTEN_TRIGGER_KEYWORDS || [
   "bot", "机器人", "助手", "codex", "qqbot", "qq bot",
-  "帮我", "帮忙", "能不能", "可以帮", "求助", "看看", "看一下", "分析", "总结", "建议",
-  "怎么", "为什么", "咋", "如何", "是否", "是不是", "吗", "？", "?",
-  "报错", "错误", "失败", "修一下", "改一下", "代码", "脚本", "实验", "作业", "报告"
+  "帮我", "帮忙", "可以帮", "求助", "看看这个", "看一下这个", "分析一下", "总结一下", "给个建议",
+  "报错", "错误", "失败", "修一下", "改一下", "代码", "脚本", "python", "公式", "推导",
+  "实验报告", "作业题", "题目", "文件", "论文", "pdf"
 ].join(","))
   .split(",")
   .map((p) => p.trim().toLowerCase())
   .filter(Boolean);
+const GROUP_TRIGGER_KEYWORD_FILE = process.env.ONEBOT_GROUP_TRIGGER_KEYWORD_FILE || "trigger_keywords.txt";
 const PROFILE_REPLY_MARKERS = (process.env.ONEBOT_PROFILE_REPLY_MARKERS || "触发回复,需要回复,关注点,未解决,重要信息")
   .split(",")
   .map((p) => p.trim())
@@ -115,6 +121,22 @@ function parseGroupRoutes(raw) {
   return routes;
 }
 
+function parsePrivateRoutes(raw) {
+  const routes = new Map();
+  const source = raw || ALLOWED_PRIVATE_USERS.map((userID, index) => {
+    const port = 3006 + index;
+    return `${userID}:${port}`;
+  }).join(",");
+
+  source.split(",").map((p) => p.trim()).filter(Boolean).forEach((item) => {
+    const [userID, port] = item.split(":").map((p) => Number(p.trim()));
+    if (userID && port) {
+      routes.set(userID, { port });
+    }
+  });
+  return routes;
+}
+
 function connectUpstream() {
   upstreamReady = false;
   upstream = new WebSocket(UPSTREAM_URL);
@@ -147,6 +169,7 @@ function connectUpstream() {
       return;
     }
     if (typeof msg.echo === "string" && msg.echo.startsWith("__image_")) {
+      handleImageSendResponse(msg);
       return;
     }
     if (typeof msg.echo === "string" && pendingBotReplies.has(msg.echo)) {
@@ -161,9 +184,15 @@ function connectUpstream() {
     }
 
     const isAllowedGroupMessage = msg.post_type === "message" && msg.message_type === "group";
+    const isPrivateMessage = msg.post_type === "message" && msg.message_type === "private";
     const isAllowedGroupNotice = msg.post_type === "notice" && ALLOWED_GROUPS.includes(Number(msg.group_id));
+    const isAllowedPrivateNotice = msg.post_type === "notice" && ALLOWED_PRIVATE_USERS.includes(Number(msg.user_id));
     if (isAllowedGroupNotice && msg.notice_type === "group_upload") {
       handleGroupUpload(msg);
+      return;
+    }
+    if (isAllowedPrivateNotice && msg.notice_type === "offline_file") {
+      handlePrivateFileNotice(msg);
       return;
     }
 
@@ -199,6 +228,21 @@ function connectUpstream() {
       return;
     }
 
+    if (isPrivateMessage) {
+      const userID = Number(msg.user_id);
+      const route = routeForPrivateUser(userID);
+      if (!route || !ALLOWED_PRIVATE_USERS.includes(userID)) {
+        log("drop private", userID, "msg", msg.message_id);
+        return;
+      }
+      recordPrivateMessage(msg);
+      enrichPrivatePdfMessage(msg);
+      ackMessage(msg);
+      activeTriggers.set(triggerKey(route.port, userID), Number(msg.message_id));
+      dispatchToPort(route.port, msg);
+      return;
+    }
+
     dispatchToPort(isAtMessage(msg) ? AT_PORT : LISTEN_PORT, msg);
   });
 
@@ -217,6 +261,10 @@ function routeForGroup(groupID) {
   return GROUP_ROUTES.get(Number(groupID)) || { listenPort: LISTEN_PORT, atPort: AT_PORT };
 }
 
+function routeForPrivateUser(userID) {
+  return PRIVATE_ROUTES.get(Number(userID));
+}
+
 function shouldDispatchListenMessage(msg) {
   if (LISTEN_TRIGGER_MODE === "all" || LISTEN_TRIGGER_MODE === "aggressive") {
     return true;
@@ -233,24 +281,25 @@ function shouldDispatchListenMessage(msg) {
     return false;
   }
   const lower = text.toLowerCase();
-  if (LISTEN_TRIGGER_KEYWORDS.some((keyword) => lower.includes(keyword))) {
-    return true;
-  }
-  if (looksLikeDirectRequest(text)) {
+  if (allListenKeywords(msg).some((keyword) => lower.includes(keyword))) {
     return true;
   }
   return profileWantsReply(msg, text);
 }
 
-function looksLikeDirectRequest(text) {
-  const s = String(text || "").trim();
-  if (s.length < 3) {
-    return false;
+function allListenKeywords(msg) {
+  return [...LISTEN_TRIGGER_KEYWORDS, ...groupListenKeywords(msg.group_id)];
+}
+
+function groupListenKeywords(groupID) {
+  const file = path.join(workspaceForGroup(groupID), GROUP_TRIGGER_KEYWORD_FILE);
+  if (!fs.existsSync(file)) {
+    return [];
   }
-  if (/[？?]$/.test(s)) {
-    return true;
-  }
-  return /^(请|求|麻烦|帮|能|可不可以|有没有|谁能|需要|想问|问一下|记录一下|提醒一下)/.test(s);
+  return fs.readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/#.*/, "").trim().toLowerCase())
+    .filter(Boolean);
 }
 
 function profileWantsReply(msg, text) {
@@ -517,10 +566,11 @@ function dreamScriptForWorkspace(workspace) {
 }
 
 function sendGroupText(groupID, replyToMessageID, text) {
-  const message = [
-    { type: "reply", data: { id: String(replyToMessageID) } },
-    { type: "text", data: { text: String(text || "") } }
-  ];
+  const message = [];
+  if (replyToMessageID) {
+    message.push({ type: "reply", data: { id: String(replyToMessageID) } });
+  }
+  message.push({ type: "text", data: { text: String(text || "") } });
   sendUpstream({
     action: "send_group_msg",
     params: {
@@ -624,10 +674,11 @@ function imageResultText(result) {
 }
 
 function sendGroupImage(groupID, replyToMessageID, imagePath, text) {
+  const imageData = fs.readFileSync(path.resolve(imagePath)).toString("base64");
   const message = [
     { type: "reply", data: { id: String(replyToMessageID) } },
     { type: "text", data: { text: `${text}\n` } },
-    { type: "image", data: { file: pathToFileURL(path.resolve(imagePath)).href } }
+    { type: "image", data: { file: `base64://${imageData}` } }
   ];
   sendUpstream({
     action: "send_group_msg",
@@ -637,6 +688,15 @@ function sendGroupImage(groupID, replyToMessageID, imagePath, text) {
     },
     echo: `__image_${groupID}_${Date.now()}`
   });
+}
+
+function handleImageSendResponse(resp) {
+  const ok = resp && (resp.status === "ok" || resp.retcode === 0);
+  if (ok) {
+    log("image send ok", "echo", resp.echo, "msg", responseMessageID(resp) || "");
+    return;
+  }
+  log("image send failed", "echo", resp && resp.echo, "retcode", resp && resp.retcode, "message", (resp && (resp.message || resp.wording)) || "");
 }
 
 function prepareOutgoing(obj, sourcePort) {
@@ -841,7 +901,18 @@ function isOutgoingMessageAction(obj) {
   return obj.action === "send_group_msg" || obj.action === "send_msg" || obj.action.endsWith(".send_group_msg");
 }
 
+function isOutgoingPrivateMessageAction(obj) {
+  if (!obj || typeof obj.action !== "string") {
+    return false;
+  }
+  return obj.action === "send_private_msg" || obj.action.endsWith(".send_private_msg");
+}
+
 function addReplyReference(obj, sourcePort) {
+  if (isOutgoingPrivateMessageAction(obj)) {
+    addPrivateReplyReference(obj, sourcePort);
+    return;
+  }
   if (!isOutgoingMessageAction(obj)) {
     return;
   }
@@ -850,6 +921,27 @@ function addReplyReference(obj, sourcePort) {
     return;
   }
   const triggerID = activeTriggers.get(triggerKey(sourcePort, groupID));
+  if (!triggerID) {
+    return;
+  }
+
+  const replySeg = { type: "reply", data: { id: String(triggerID) } };
+  if (typeof obj.params.message === "string") {
+    obj.params.message = [replySeg, { type: "text", data: { text: obj.params.message } }];
+  } else if (Array.isArray(obj.params.message)) {
+    const hasReply = obj.params.message.some((seg) => seg && seg.type === "reply");
+    if (!hasReply) {
+      obj.params.message = [replySeg, ...obj.params.message];
+    }
+  }
+}
+
+function addPrivateReplyReference(obj, sourcePort) {
+  const userID = outgoingUserID(obj);
+  if (!ALLOWED_PRIVATE_USERS.includes(userID)) {
+    return;
+  }
+  const triggerID = activeTriggers.get(triggerKey(sourcePort, userID));
   if (!triggerID) {
     return;
   }
@@ -874,11 +966,17 @@ function trackOutgoingAPI(obj, sourcePort) {
     pendingEchoPorts.set(obj.echo, sourcePort);
   }
 
-  if (!isOutgoingMessageAction(obj)) {
+  if (!isOutgoingMessageAction(obj) && !isOutgoingPrivateMessageAction(obj)) {
     return obj;
   }
 
   const groupID = outgoingGroupID(obj);
+  if (isOutgoingPrivateMessageAction(obj)) {
+    const echo = typeof obj.echo === "string" && obj.echo ? obj.echo : `__privreply_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const tracked = obj.echo === echo ? obj : { ...obj, echo };
+    pendingEchoPorts.set(echo, sourcePort);
+    return tracked;
+  }
   if (!ALLOWED_GROUPS.includes(groupID)) {
     return obj;
   }
@@ -888,6 +986,14 @@ function trackOutgoingAPI(obj, sourcePort) {
   pendingBotReplies.set(echo, { groupID, port: sourcePort, ts: Date.now() });
   pendingEchoPorts.set(echo, sourcePort);
   return tracked;
+}
+
+function outgoingUserID(obj) {
+  if (!obj || !obj.params) {
+    return null;
+  }
+  const userID = obj.params.user_id || obj.params.userId;
+  return userID === undefined || userID === null ? null : Number(userID);
 }
 
 function handleBotReplyResponse(resp) {
@@ -930,6 +1036,10 @@ function workspaceForGroup(groupID) {
   return path.resolve(WORKSPACE_ROOT, `sandbox-${Number(groupID)}`);
 }
 
+function workspaceForPrivateUser(userID) {
+  return path.resolve(path.dirname(WORKSPACE_ROOT), "users", String(Number(userID)));
+}
+
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -965,6 +1075,187 @@ function recordGroupMessage(msg) {
   };
   appendLine(path.join(workspace, "memory", `chat-${todayLocal()}.jsonl`), JSON.stringify(record));
   touchMemberProfile(workspace, msg);
+}
+
+function recordPrivateMessage(msg) {
+  const workspace = workspaceForPrivateUser(msg.user_id);
+  const record = {
+    time: new Date().toISOString(),
+    message_id: String(msg.message_id),
+    user_id: String(msg.user_id || ""),
+    sender: msg.sender || {},
+    text: messageText(msg),
+    has_image: Array.isArray(msg.message) && msg.message.some((seg) => seg && seg.type === "image"),
+    raw_message: msg.raw_message || ""
+  };
+  appendLine(path.join(workspace, "memory", `chat-${todayLocal()}.jsonl`), JSON.stringify(record));
+  touchPrivateProfile(workspace, msg);
+}
+
+function touchPrivateProfile(workspace, msg) {
+  const sender = msg.sender || {};
+  const userID = String(msg.user_id || "unknown");
+  const display = String(sender.nickname || sender.card || userID);
+  const file = path.join(workspace, "PROFILE.md");
+  if (!fs.existsSync(file)) {
+    ensureDir(path.dirname(file));
+    fs.writeFileSync(file, [
+      `# ${display}`,
+      "",
+      `- QQ: ${userID}`,
+      `- 首次记录: ${new Date().toISOString()}`,
+      "- 回复偏好: 待观察",
+      "- 长期目标/任务: 待观察",
+      "- 重要背景:",
+      "- 未完成事项:",
+      "",
+      "## 最近观察",
+      ""
+    ].join("\n"), "utf8");
+  }
+  const text = messageText(msg).slice(0, 220);
+  appendLine(file, `- ${new Date().toISOString()} ${text}`);
+}
+
+function handlePrivateFileNotice(msg) {
+  const userID = Number(msg.user_id);
+  const route = routeForPrivateUser(userID);
+  if (!route) {
+    log("drop private file", userID);
+    return;
+  }
+  const saved = savePrivatePdfFileData(msg, msg.file || {});
+  if (saved.length === 0 && requestPrivateFileDownload(msg, msg.file || {})) {
+    return;
+  }
+  const text = saved.length > 0
+    ? ["收到 PDF 文件，已保存到私聊沙箱：", ...saved.map((file) => `- ${file}`)].join("\n")
+    : `收到文件通知：${JSON.stringify(msg.file || {})}`;
+  const synthetic = {
+    post_type: "message",
+    message_type: "private",
+    user_id: userID,
+    message_id: msg.message_id || Date.now(),
+    sender: msg.sender || {},
+    message: [{ type: "text", data: { text } }],
+    raw_message: text
+  };
+  recordPrivateMessage(synthetic);
+  activeTriggers.set(triggerKey(route.port, userID), Number(synthetic.message_id));
+  dispatchToPort(route.port, synthetic);
+}
+
+function enrichPrivatePdfMessage(msg) {
+  const pdfs = savePrivatePdfs(msg);
+  if (pdfs.length === 0) {
+    return;
+  }
+  const note = [
+    "收到 PDF 文件，已保存到私聊沙箱：",
+    ...pdfs.map((file) => `- ${file}`)
+  ].join("\n");
+  const original = messageText(msg);
+  msg.message = [{ type: "text", data: { text: `${original}\n\n${note}`.trim() } }];
+  msg.raw_message = `${original}\n\n${note}`.trim();
+}
+
+function savePrivatePdfs(msg) {
+  const segments = Array.isArray(msg.message) ? msg.message : [];
+  const saved = [];
+  for (const seg of segments) {
+    if (!seg || seg.type !== "file" || !seg.data) {
+      continue;
+    }
+    const result = savePrivatePdfFileData(msg, seg.data);
+    if (result.length === 0) {
+      requestPrivateFileDownload(msg, seg.data);
+    }
+    saved.push(...result);
+  }
+  return saved;
+}
+
+function requestPrivateFileDownload(msg, data) {
+  const fileID = data && (data.id || data.file_id);
+  if (!fileID) {
+    return false;
+  }
+  const echo = `__file_private_${msg.user_id}_${Date.now()}`;
+  pendingFileDownloads.set(echo, {
+    userID: Number(msg.user_id),
+    fileName: data.name || data.file_name || data.file || fileID,
+    messageID: msg.message_id || "",
+    fileInfo: data
+  });
+  sendUpstream({
+    action: "get_file",
+    params: { file_id: String(fileID) },
+    echo
+  });
+  log("private file download requested", msg.user_id, fileID);
+  return true;
+}
+
+function savePrivatePdfFileData(msg, data) {
+  const workspace = workspaceForPrivateUser(msg.user_id);
+  const name = safeName(data.name || data.file_name || data.file || data.file_id || `upload-${Date.now()}.pdf`);
+  if (!name.toLowerCase().endsWith(".pdf")) {
+    return [];
+  }
+  const target = path.join(workspace, "local_files", "pdfs", name);
+  ensureDir(path.dirname(target));
+  const source = data.path || data.file || data.url;
+  try {
+    if (source && typeof source === "string" && fs.existsSync(source)) {
+      fs.copyFileSync(source, target);
+    } else if (source && /^file:\/\//i.test(source)) {
+      fs.copyFileSync(new URL(source), target);
+    } else if (source && /^https?:\/\//i.test(source)) {
+      execFileSync("curl", ["-fsSL", "-o", target, source], { timeout: 120000 });
+    } else {
+      appendLine(path.join(workspace, "memory", `file-events-${todayLocal()}.jsonl`), JSON.stringify({
+        time: new Date().toISOString(),
+        type: "private_pdf_pending",
+        user_id: String(msg.user_id || ""),
+        message_id: String(msg.message_id || ""),
+        file: data
+      }));
+      return [`local_files/pdfs/${name}（待从 NapCat 文件缓存获取）`];
+    }
+    const rel = path.relative(workspace, target).replace(/\\/g, "/");
+    appendLine(path.join(workspace, "local_files", "INDEX.md"), `- ${new Date().toISOString()} PDF: ${rel}`);
+    parsePrivatePdf(workspace, target, rel, msg, data).catch((err) => {
+      log("private pdf parse failed", msg.user_id, rel, err.message);
+    });
+    return [rel];
+  } catch (err) {
+    log("private pdf save failed", msg.user_id, name, err.message);
+    return [];
+  }
+}
+
+async function parsePrivatePdf(workspace, target, rel, msg, data) {
+  const sidecarDir = `${target}.archive`;
+  ensureDir(sidecarDir);
+  const meta = {
+    time: new Date().toISOString(),
+    user_id: String(msg.user_id || ""),
+    message_id: String(msg.message_id || ""),
+    file: rel,
+    source: data || {},
+    parser: "pdf-parse"
+  };
+  const extracted = (await extractPdfText(target)).replace(/\r\n/g, "\n").replace(/\n{4,}/g, "\n\n\n").trim();
+  fs.writeFileSync(path.join(sidecarDir, "meta.json"), JSON.stringify(meta, null, 2), "utf8");
+  fs.writeFileSync(path.join(sidecarDir, "extracted.txt"), extracted, "utf8");
+  fs.writeFileSync(path.join(sidecarDir, "summary.md"), buildFileSummary({ path: target, relativePath: rel, name: path.basename(target) }, extracted, meta), "utf8");
+  appendLine(path.join(workspace, "memory", `file-archive-${todayLocal()}.jsonl`), JSON.stringify({
+    time: new Date().toISOString(),
+    user_id: String(msg.user_id || ""),
+    file: rel,
+    extracted_chars: extracted.length,
+    summary: path.relative(workspace, path.join(sidecarDir, "summary.md")).replace(/\\/g, "/")
+  }));
 }
 
 function touchMemberProfile(workspace, msg) {
@@ -1014,7 +1305,7 @@ function handleGroupUpload(msg) {
     return;
   }
   const echo = `__file_${msg.group_id}_${Date.now()}`;
-  pendingFileDownloads.set(echo, { groupID: Number(msg.group_id), fileName: fileInfo.name || fileID });
+  pendingFileDownloads.set(echo, { groupID: Number(msg.group_id), fileName: fileInfo.name || fileID, messageID: msg.message_id || "", fileInfo });
   sendUpstream({
     action: "get_file",
     params: { file_id: String(fileID) },
@@ -1030,17 +1321,160 @@ function handleFileDownloadResponse(resp) {
   }
   const data = resp.data || {};
   const source = data.file || data.path || data.url;
+  if (pendingInfo.userID) {
+    const workspace = workspaceForPrivateUser(pendingInfo.userID);
+    const saved = savePrivatePdfFileData({
+      user_id: pendingInfo.userID,
+      message_id: pendingInfo.messageID || ""
+    }, { ...pendingInfo.fileInfo, ...data, source });
+    const route = routeForPrivateUser(pendingInfo.userID);
+    if (route && saved.length > 0) {
+      const text = ["收到 PDF 文件，已保存并开始解析：", ...saved.map((file) => `- ${file}`)].join("\n");
+      const synthetic = {
+        post_type: "message",
+        message_type: "private",
+        user_id: pendingInfo.userID,
+        message_id: pendingInfo.messageID || Date.now(),
+        sender: {},
+        message: [{ type: "text", data: { text } }],
+        raw_message: text
+      };
+      recordPrivateMessage(synthetic);
+      activeTriggers.set(triggerKey(route.port, pendingInfo.userID), Number(synthetic.message_id));
+      dispatchToPort(route.port, synthetic);
+    } else {
+      appendLine(path.join(workspace, "local_files", "INDEX.md"), `- ${new Date().toISOString()} 私聊文件待手动获取: ${pendingInfo.fileName}; get_file=${JSON.stringify(data)}`);
+    }
+    return;
+  }
   const workspace = workspaceForGroup(pendingInfo.groupID);
-  if (source && typeof source === "string" && fs.existsSync(source)) {
-    const target = path.join(workspace, "local_files", safeName(pendingInfo.fileName));
-    ensureDir(path.dirname(target));
-    fs.copyFileSync(source, target);
-    appendLine(path.join(workspace, "local_files", "INDEX.md"), `- ${new Date().toISOString()} 已保存: ${path.basename(target)}`);
-    log("file saved", pendingInfo.groupID, target);
+  const saved = saveGroupFileData(workspace, pendingInfo, { ...pendingInfo.fileInfo, ...data, source });
+  if (saved) {
+    appendLine(path.join(workspace, "local_files", "INDEX.md"), `- ${new Date().toISOString()} 已归档: ${saved.relativePath}`);
+    log("file archived", pendingInfo.groupID, saved.relativePath);
+    archiveSavedFile(workspace, saved, pendingInfo).then((result) => {
+      if (result && result.notice) {
+        sendGroupText(pendingInfo.groupID, pendingInfo.messageID || 0, result.notice);
+      }
+    }).catch((err) => {
+      log("file archive parse failed", pendingInfo.groupID, saved.relativePath, err.message);
+      sendGroupText(pendingInfo.groupID, pendingInfo.messageID || 0, `文件已归档，但解析失败：${saved.relativePath}\n${err.message}`);
+    });
     return;
   }
   appendLine(path.join(workspace, "local_files", "INDEX.md"), `- ${new Date().toISOString()} 文件待手动获取: ${pendingInfo.fileName}; get_file=${JSON.stringify(data)}`);
   log("file metadata saved", pendingInfo.groupID, pendingInfo.fileName);
+}
+
+function saveGroupFileData(workspace, pendingInfo, data) {
+  const rawName = data.name || data.file_name || pendingInfo.fileName || data.file || data.file_id || `upload-${Date.now()}`;
+  const name = safeName(rawName);
+  const dir = path.join(workspace, "local_files", "archive", todayLocal());
+  ensureDir(dir);
+  const target = uniquePath(path.join(dir, name));
+  const source = data.source || data.path || data.file || data.url;
+  try {
+    if (source && typeof source === "string" && fs.existsSync(source)) {
+      fs.copyFileSync(source, target);
+    } else if (source && /^file:\/\//i.test(source)) {
+      fs.copyFileSync(new URL(source), target);
+    } else if (source && /^https?:\/\//i.test(source)) {
+      execFileSync("curl", ["-fsSL", "-o", target, source], { timeout: 180000 });
+    } else {
+      return null;
+    }
+    const relativePath = path.relative(workspace, target).replace(/\\/g, "/");
+    appendLine(path.join(workspace, "memory", `file-events-${todayLocal()}.jsonl`), JSON.stringify({
+      time: new Date().toISOString(),
+      type: "group_file_archived",
+      group_id: String(pendingInfo.groupID),
+      file: { ...data, local_path: relativePath }
+    }));
+    return { path: target, relativePath, name: path.basename(target) };
+  } catch (err) {
+    log("group file save failed", pendingInfo.groupID, name, err.message);
+    return null;
+  }
+}
+
+function uniquePath(target) {
+  if (!fs.existsSync(target)) {
+    return target;
+  }
+  const parsed = path.parse(target);
+  for (let i = 2; i < 1000; i += 1) {
+    const candidate = path.join(parsed.dir, `${parsed.name}-${i}${parsed.ext}`);
+    if (!fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return path.join(parsed.dir, `${parsed.name}-${Date.now()}${parsed.ext}`);
+}
+
+async function archiveSavedFile(workspace, saved, pendingInfo) {
+  const ext = path.extname(saved.path).toLowerCase();
+  const sidecarDir = `${saved.path}.archive`;
+  ensureDir(sidecarDir);
+  const meta = {
+    time: new Date().toISOString(),
+    group_id: String(pendingInfo.groupID),
+    original_name: pendingInfo.fileName,
+    file: saved.relativePath,
+    size: fs.statSync(saved.path).size,
+    parser: "none"
+  };
+
+  let extracted = "";
+  if (ext === ".pdf") {
+    extracted = await extractPdfText(saved.path);
+    meta.parser = "pdf-parse";
+  } else if ([".txt", ".md", ".csv", ".json", ".log"].includes(ext)) {
+    extracted = fs.readFileSync(saved.path, "utf8");
+    meta.parser = "text";
+  }
+
+  fs.writeFileSync(path.join(sidecarDir, "meta.json"), JSON.stringify(meta, null, 2), "utf8");
+  if (extracted) {
+    const clean = extracted.replace(/\r\n/g, "\n").replace(/\n{4,}/g, "\n\n\n").trim();
+    fs.writeFileSync(path.join(sidecarDir, "extracted.txt"), clean, "utf8");
+    fs.writeFileSync(path.join(sidecarDir, "summary.md"), buildFileSummary(saved, clean, meta), "utf8");
+    appendLine(path.join(workspace, "memory", `file-archive-${todayLocal()}.jsonl`), JSON.stringify({
+      time: new Date().toISOString(),
+      group_id: String(pendingInfo.groupID),
+      file: saved.relativePath,
+      extracted_chars: clean.length,
+      summary: path.relative(workspace, path.join(sidecarDir, "summary.md")).replace(/\\/g, "/")
+    }));
+    return { notice: `文件已自动下载并解析归档：${saved.relativePath}\n提取文本：${path.relative(workspace, path.join(sidecarDir, "extracted.txt")).replace(/\\/g, "/")}` };
+  }
+  return { notice: `文件已自动下载归档：${saved.relativePath}` };
+}
+
+async function extractPdfText(filePath) {
+  let pdfParse;
+  try {
+    pdfParse = require("pdf-parse");
+  } catch {
+    throw new Error("缺少 pdf-parse 依赖，无法解析 PDF");
+  }
+  const data = await pdfParse(fs.readFileSync(filePath));
+  return String(data.text || "");
+}
+
+function buildFileSummary(saved, text, meta) {
+  const preview = text.slice(0, 3000);
+  return [
+    `# ${saved.name}`,
+    "",
+    `- 文件: ${saved.relativePath}`,
+    `- 解析器: ${meta.parser}`,
+    `- 字符数: ${text.length}`,
+    `- 归档时间: ${meta.time}`,
+    "",
+    "## 文本预览",
+    "",
+    preview || "无可提取文本。"
+  ].join("\n");
 }
 
 function isAtMessage(msg) {
@@ -1084,7 +1518,7 @@ for (const port of LISTEN_PORTS) {
   });
 
   server.on("listening", () => {
-    log("proxy listening", port, "allowed_groups", ALLOWED_GROUPS.join(","), "listen_port", LISTEN_PORT, "at_port", AT_PORT);
+    log("proxy listening", port, "allowed_groups", ALLOWED_GROUPS.join(","), "allowed_private", ALLOWED_PRIVATE_USERS.join(","), "listen_port", LISTEN_PORT, "at_port", AT_PORT);
   });
 }
 

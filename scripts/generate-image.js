@@ -78,6 +78,60 @@ async function postJSON(url, body) {
   return data;
 }
 
+async function postSSE(url, body, onEvent) {
+  const key = apiKey();
+  if (!key) {
+    throw new Error("missing OPENAI_IMAGE_API_KEY or OPENAI_API_KEY");
+  }
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${key}`,
+      "Content-Type": "application/json",
+      "Accept": "text/event-stream"
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
+    }
+    const message = data && data.error && data.error.message ? data.error.message : text;
+    throw new Error(`HTTP ${res.status}: ${message}`);
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for await (const chunk of res.body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const dataLines = block
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trim());
+      if (!dataLines.length) {
+        continue;
+      }
+      const payload = dataLines.join("\n");
+      if (payload === "[DONE]") {
+        continue;
+      }
+      try {
+        onEvent(JSON.parse(payload));
+      } catch {
+        // Some relays can emit non-JSON keepalive frames.
+      }
+    }
+  }
+}
+
 function imageFromResponses(data) {
   const output = Array.isArray(data.output) ? data.output : [];
   for (const item of output) {
@@ -119,6 +173,56 @@ function imageFromImages(data) {
   return {
     b64,
     revisedPrompt: first.revised_prompt || first.revisedPrompt || ""
+  };
+}
+
+async function generateWithResponsesStream(prompt, options) {
+  const tool = {
+    type: "image_generation",
+    partial_images: options.partialImages,
+    size: options.size,
+    quality: options.quality
+  };
+  if (options.outputFormat) {
+    tool.output_format = options.outputFormat;
+  }
+  const body = {
+    model: options.responsesModel,
+    input: prompt,
+    tools: [tool],
+    tool_choice: { type: "image_generation" },
+    stream: true
+  };
+
+  let b64 = "";
+  let revisedPrompt = "";
+  await postSSE(`${apiBase()}/responses`, body, (event) => {
+    if (event.type === "response.image_generation_call.partial_image" && event.partial_image_b64) {
+      b64 = event.partial_image_b64;
+    }
+    if (event.type === "response.completed" && event.response) {
+      try {
+        const image = imageFromResponses(event.response);
+        if (image.b64) {
+          b64 = image.b64;
+        }
+        if (image.revisedPrompt) {
+          revisedPrompt = image.revisedPrompt;
+        }
+      } catch {
+        // Sub2API can complete with empty output; keep the latest partial image.
+      }
+    }
+  });
+
+  if (!b64) {
+    throw new Error("Responses stream returned no partial_image_b64");
+  }
+  return {
+    b64,
+    revisedPrompt,
+    model: options.responsesModel,
+    mode: "responses-stream"
   };
 }
 
@@ -177,6 +281,9 @@ async function generateWithImages(prompt, options) {
 }
 
 async function generate(prompt, options) {
+  if (options.mode === "responses-stream" || options.mode === "sub2api") {
+    return generateWithResponsesStream(prompt, options);
+  }
   if (options.mode === "responses") {
     return generateWithResponses(prompt, options);
   }
@@ -209,6 +316,7 @@ async function main() {
     size: process.env.ONEBOT_IMAGE_SIZE || "1024x1024",
     quality: process.env.ONEBOT_IMAGE_QUALITY || "medium",
     outputFormat: process.env.ONEBOT_IMAGE_OUTPUT_FORMAT || "png",
+    partialImages: Number(process.env.ONEBOT_IMAGE_PARTIAL_IMAGES || 3),
     autoFallback: envBool("ONEBOT_IMAGE_AUTO_FALLBACK", true)
   };
 

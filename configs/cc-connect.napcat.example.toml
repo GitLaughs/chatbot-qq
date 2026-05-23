@@ -26,14 +26,14 @@ max_messages = 20
 window_secs = 60
 
 [[projects]]
-name = "qq-sandbox-group-a-listen"
+name = "qq-sandbox-GROUP_ID_A-listen"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-<group-id-a>"
+work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-GROUP_ID_A"
 mode = "full-auto"
 model = "gpt-5.4-mini"
 reasoning_effort = "medium"
@@ -48,14 +48,14 @@ allow_from = "*"
 share_session_in_channel = true
 
 [[projects]]
-name = "qq-sandbox-group-a-at"
+name = "qq-sandbox-GROUP_ID_A-at"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-<group-id-a>"
+work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-GROUP_ID_A"
 mode = "full-auto"
 model = "gpt-5.5"
 reasoning_effort = "high"
@@ -70,14 +70,14 @@ allow_from = "*"
 share_session_in_channel = false
 
 [[projects]]
-name = "qq-sandbox-group-b-listen"
+name = "qq-sandbox-GROUP_ID_B-listen"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-<group-id-b>"
+work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-GROUP_ID_B"
 mode = "full-auto"
 model = "gpt-5.4-mini"
 reasoning_effort = "medium"
@@ -92,14 +92,14 @@ allow_from = "*"
 share_session_in_channel = true
 
 [[projects]]
-name = "qq-sandbox-group-b-at"
+name = "qq-sandbox-GROUP_ID_B-at"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-<group-id-b>"
+work_dir = "E:\\CHATBOT-QQ\\groups\\sandbox-GROUP_ID_B"
 mode = "full-auto"
 model = "gpt-5.5"
 reasoning_effort = "high"

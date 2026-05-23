@@ -1,0 +1,34 @@
+name: Bug report
+description: Report a reproducible chatbot-qq issue.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction
+      description: Include sanitized steps and commands.
+      placeholder: Do not paste secrets, QQ openids, group IDs, QR codes, or chat logs.
+    validations:
+      required: true
+  - type: dropdown
+    id: route
+    attributes:
+      label: Route
+      options:
+        - NapCat / OneBot
+        - Official QQ Bot
+        - Linux service
+        - Windows local run
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      render: text

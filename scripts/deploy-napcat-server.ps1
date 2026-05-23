@@ -20,6 +20,8 @@ tar `
     --exclude ".cc-connect" `
     --exclude "configs/*.local.toml" `
     --exclude "configs/*.lock" `
+    --exclude "groups/sandbox-*" `
+    --exclude "users" `
     -cf $archive .
 
 Write-Host "Uploading to ${Server}:$RemoteDir"
@@ -68,5 +70,5 @@ Remove-Item -LiteralPath $archive -Force
 
 Write-Host "Done. Feishu service was not modified."
 Write-Host "Next checks:"
-Write-Host "  ssh $Server 'systemctl is-active cc-connect; ss -ltnp | grep -E `"3001|3002|3003`" || true'"
+Write-Host "  ssh $Server 'systemctl is-active cc-connect; ss -ltnp | grep -E `"3001|3002|3003|3004|3005|3006`" || true'"
 Write-Host "  ssh $Server 'systemctl start onebot-group-proxy cc-connect-qq'"

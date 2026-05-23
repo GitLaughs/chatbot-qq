@@ -35,6 +35,7 @@ Step "Sensitive local-data scan"
 $forbidden = @(
   ("110" + "7099585"),
   ("171" + "290904"),
+  ("213" + "8730775"),
   ("sk-" + "qq-low"),
   ("sk-" + "feishu-high")
 )

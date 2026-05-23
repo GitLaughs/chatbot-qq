@@ -10,6 +10,7 @@ backup/
 tools/
 chatbot-qq-qrcode.png
 groups/sandbox-*/
+users/
 groups/*/members/
 groups/*/memory/
 groups/*/local_files/generated/

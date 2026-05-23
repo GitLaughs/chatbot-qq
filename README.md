@@ -1,8 +1,36 @@
-# chatbot QQ
+# chatbot-qq
 
-QQ bot workspace for cc-connect.
+[![CI](https://github.com/GitLaughs/chatbot-qq/actions/workflows/ci.yml/badge.svg)](https://github.com/GitLaughs/chatbot-qq/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/GitLaughs/chatbot-qq)](https://github.com/GitLaughs/chatbot-qq/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Current target: QQ through NapCat / OneBot v11 into cc-connect native `qq` platform. Official QQ Bot remains a fallback because production gateway setup is blocked.
+QQ bot workspace for cc-connect through NapCat / OneBot v11, with official QQ Bot APIs kept as the preferred long-term path.
+
+[中文安装教程](docs/install.zh-CN.md) · [Linux 中文安装](docs/install-linux.zh-CN.md) · [NapCat 设置](docs/napcat-setup.md) · [官方 QQ Bot 备用方案](docs/qqbot-auth-and-setup.md)
+
+Keywords: QQ bot, QQ group bot, cc-connect, Codex QQ bot, NapCat, OneBot v11, QQ official bot API, group workspace, private chat routing, image generation, QQ机器人, QQ群机器人, QQ 群聊 Codex, NapCat 机器人, OneBot 机器人, cc-connect QQ, 群聊工作区, 私聊路由, 做梦, 画图。
+
+`chatbot-qq` packages the QQ side of a cc-connect bot deployment:
+
+- NapCat / OneBot v11 bridge into cc-connect native `qq` platform.
+- Group listen and @ routes for light monitoring plus deeper direct tasks.
+- Optional private chat route for allowlisted users.
+- `/dream` workspace maintenance and `/画图` image generation helpers.
+- Linux systemd deployment templates isolated from Feishu or other cc-connect services.
+- Official QQ Bot Go adapter kept isolated as a fallback experiment.
+
+This repository contains scripts and templates only. It does not contain app secrets, QQ openids, group IDs, chat logs, QR codes, NapCat runtime data, or generated local configs.
+
+## Why This Exists
+
+QQ bot deployment is split between two worlds:
+
+| Path | Best Use | Status |
+|---|---|---|
+| QQ official bot API | long-term production route | preferred when gateway access works |
+| NapCat / OneBot v11 | practical local/server bridge | current working route |
+
+This repo keeps those paths separate so a working NapCat deployment does not block a future official QQ Bot adapter.
 
 ## Layout
 
@@ -23,19 +51,42 @@ Current target: QQ through NapCat / OneBot v11 into cc-connect native `qq` platf
 - `docs/server-deploy.md` - Linux server deployment notes and conflict checklist
 - `deploy/linux` - isolated systemd/env templates for the Linux NapCat route
 
+## Requirements
+
+- Windows 10/11 with PowerShell 5.1+ or Linux with bash/systemd
+- Node.js 20+ and npm
+- `cc-connect` installed and available on `PATH`
+- NapCat exposing OneBot v11 WebSocket at `ws://127.0.0.1:3001`
+- A QQ account/bot allowed to join the target group
+
+Install cc-connect:
+
+```powershell
+npm install -g cc-connect
+cc-connect --version
+```
+
 ## Quick Start
 
 ```powershell
-cd E:\CHATBOT-QQ
-Copy-Item configs\cc-connect.napcat.example.toml configs\cc-connect.napcat.local.toml
-.\scripts\start-cc-connect-napcat.ps1
+git clone https://github.com/GitLaughs/chatbot-qq.git
+cd chatbot-qq
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
-Start NapCat first, log in with QQ, and enable OneBot v11 WebSocket at `ws://127.0.0.1:3001`. Put allowed group IDs only in ignored local config or server env files.
+Linux:
+
+```bash
+git clone https://github.com/GitLaughs/chatbot-qq.git
+cd chatbot-qq
+bash ./scripts/install-linux.sh
+```
+
+Start NapCat first, log in with QQ, and enable OneBot v11 WebSocket at `ws://127.0.0.1:3001`. Put real group IDs, private user IDs, tokens, and provider keys only in ignored local config or server env files.
 
 ## Server Deploy
 
-For Linux deployment, read `docs/server-deploy.md` first. Prefer the official QQ Bot path when available. If using NapCat on Linux, install the Node dependency with `npm install --omit=dev` and do not deploy the bundled Windows NapCat package under `tools/`.
+For Linux deployment, read `docs/install-linux.zh-CN.md` and `docs/server-deploy.md` first. Prefer the official QQ Bot path when available. If using NapCat on Linux, install the Node dependency with `npm install --omit=dev` and do not deploy any bundled Windows NapCat package under `tools/`.
 
 Current server plan uses NapCat / OneBot with separate services:
 

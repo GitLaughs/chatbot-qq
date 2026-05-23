@@ -14,7 +14,7 @@ systemctl is-active onebot-group-proxy cc-connect-qq 2>/dev/null || true
 
 echo
 echo "== Listen ports =="
-ss -ltnp | grep -E '(:3001|:3002|:3003|:18081)' || true
+ss -ltnp | grep -E '(:3001|:3002|:3003|:3004|:3005|:3006|:18081)' || true
 
 echo
 echo "== Config isolation =="

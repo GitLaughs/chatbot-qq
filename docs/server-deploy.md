@@ -45,6 +45,7 @@ Ports:
 - NapCat upstream OneBot WebSocket: `127.0.0.1:3001`
 - first group listen / @ proxy: `127.0.0.1:3002` / `127.0.0.1:3003`
 - second group listen / @ proxy: `127.0.0.1:3004` / `127.0.0.1:3005`
+- private user proxy: `127.0.0.1:3006`
 
 From Windows, sync the folder to the server without deploying the bundled Windows NapCat package:
 
@@ -64,11 +65,13 @@ The script refuses to use `/root/.cc-connect` or `/opt/openclaw` as QQ targets.
 On the server, edit `/etc/chatbot-qq.env` and keep only the approved QQ group IDs:
 
 ```bash
-ONEBOT_ALLOWED_GROUPS=REPLACE_WITH_GROUP_ID_1,REPLACE_WITH_GROUP_ID_2
+ONEBOT_ALLOWED_GROUPS=REPLACE_WITH_GROUP_ID_A,REPLACE_WITH_GROUP_ID_B
+ONEBOT_ALLOWED_PRIVATE_USERS=REPLACE_WITH_PRIVATE_USER_ID_A
 ONEBOT_UPSTREAM_URL=ws://127.0.0.1:3001
-ONEBOT_PROXY_PORTS=3002,3003,3004,3005
+ONEBOT_PROXY_PORTS=3002,3003,3004,3005,3006
 ONEBOT_LISTEN_PORT=3002
 ONEBOT_AT_PORT=3003
+ONEBOT_PRIVATE_ROUTES=REPLACE_WITH_PRIVATE_USER_ID_A:3006
 ONEBOT_ACK_EMOJI_ID=76
 ONEBOT_DREAM_COMMAND_ENABLED=1
 ONEBOT_DREAM_TRIGGERS=/dream,做梦
@@ -130,7 +133,8 @@ Then use `cc-connect-qq.service`.
 - Do not reuse `/root/.cc-connect/config.toml` unless intentionally merging with OpenClaw.
 - Do not set `data_dir = "/root/.cc-connect"` for QQ.
 - Do not deploy `tools/NapCat.Shell.Windows.OneKey` to Linux.
-- Keep OneBot ports `3001` through `3005` unique.
+- Keep OneBot ports `3001` through `3006` unique.
 - Keep QQ group workspaces under `/opt/chatbot-qq/groups`, not `/opt/openclaw`.
+- Keep QQ private workspaces under `/opt/chatbot-qq/users`, not in group folders.
 - Keep secrets in `/etc/chatbot-qq.env` or ignored local config files.
 - Before and after deployment, `systemctl is-active cc-connect` should stay `active`.

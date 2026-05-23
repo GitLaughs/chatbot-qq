@@ -7,6 +7,26 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-23
+
+### Added
+
+- Windows beginner installer for NapCat / OneBot cc-connect setup.
+- Linux beginner installer for isolated systemd deployment.
+- Chinese Windows and Linux installation guides.
+- GitHub release configuration, issue templates, pull request template, badges, and public repository metadata.
+- Public documentation keywords for QQ bot, NapCat, OneBot, cc-connect, group workspace, private chat routing, `/dream`, and image generation workflows.
+
+### Changed
+
+- README now follows a more GitHub-friendly structure with badges, quick start, requirements, architecture context, and security boundaries.
+- Public config examples now use placeholder group and private user IDs.
+- Deployment packaging excludes local group workspaces and private user workspaces.
+
+### Security
+
+- Release validation scans private user IDs in addition to group IDs and placeholder keys.
+
 ## [0.1.0] - 2026-05-23
 
 ### Added
