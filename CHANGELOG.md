@@ -7,6 +7,17 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-05-23
+
+### Added
+
+- Added local health alert markers for scheduled operations reports.
+- Added `ALERT.json`, `ACTIVE.txt`, and timestamped failure summaries under the health alert directory.
+
+### Changed
+
+- Successful health reports now clear the active alert marker while retaining the latest alert state JSON.
+
 ## [0.2.10] - 2026-05-23
 
 ### Changed

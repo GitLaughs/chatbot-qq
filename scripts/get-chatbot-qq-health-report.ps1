@@ -2,6 +2,7 @@ param(
     [string]$Server = "root@203.0.113.10",
     [string]$LocalBackupDir = "E:\CHATBOT-QQ\backup\server-daily",
     [string]$OutputDir = "E:\CHATBOT-QQ\backup\health-reports",
+    [string]$AlertDir = "E:\CHATBOT-QQ\backup\health-alerts",
     [int]$BackupMaxAgeHours = 30,
     [int]$KeepDays = 14,
     [switch]$InstallScheduledTask,
@@ -13,7 +14,7 @@ $ErrorActionPreference = "Stop"
 
 if ($InstallScheduledTask) {
     $script = Join-Path (Split-Path -Parent $PSScriptRoot) "scripts\get-chatbot-qq-health-report.ps1"
-    $args = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -Server `"$Server`" -LocalBackupDir `"$LocalBackupDir`" -OutputDir `"$OutputDir`" -BackupMaxAgeHours $BackupMaxAgeHours -KeepDays $KeepDays"
+    $args = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -Server `"$Server`" -LocalBackupDir `"$LocalBackupDir`" -OutputDir `"$OutputDir`" -AlertDir `"$AlertDir`" -BackupMaxAgeHours $BackupMaxAgeHours -KeepDays $KeepDays"
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $args
     $trigger = New-ScheduledTaskTrigger -Daily -At 4:00am
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
@@ -156,6 +157,45 @@ function Mask-Id($Text) {
 
 function Mask-Text($Text) {
     return [regex]::Replace([string]$Text, '\b\d{6,12}\b', { param($m) Mask-Id $m.Value })
+}
+
+function Write-AlertState($Report, $Directory, $Stamp, $ReportPath) {
+    if (-not $Directory) {
+        return
+    }
+
+    New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+    $activePath = Join-Path $Directory "ACTIVE.txt"
+    $latestPath = Join-Path $Directory "ALERT.json"
+    $okPath = Join-Path $Directory "OK.txt"
+
+    $alert = [ordered]@{
+        active = -not $Report.ok
+        time = $Report.time
+        server = $Report.server
+        failures = @($Report.failures)
+        report = $ReportPath
+    }
+    ($alert | ConvertTo-Json -Depth 8) | Set-Content -Path $latestPath -Encoding UTF8
+
+    if ($Report.ok) {
+        if (Test-Path -LiteralPath $activePath) {
+            Remove-Item -LiteralPath $activePath -Force
+        }
+        "OK $($Report.time)" | Set-Content -Path $okPath -Encoding UTF8
+        return
+    }
+
+    $summary = @(
+        "CHATBOT-QQ health alert"
+        "time: $($Report.time)"
+        "server: $($Report.server)"
+        "report: $ReportPath"
+        "failures:"
+    ) + @($Report.failures | ForEach-Object { "- $_" })
+    $summaryText = ($summary -join "`n")
+    $summaryText | Set-Content -Path $activePath -Encoding UTF8
+    $summaryText | Set-Content -Path (Join-Path $Directory "chatbot-qq-health-alert-$Stamp.txt") -Encoding UTF8
 }
 
 $report = [ordered]@{
@@ -306,10 +346,11 @@ if (-not $IncludeSensitive) {
     }
 }
 $json = $report | ConvertTo-Json -Depth 12
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$reportPath = $null
 
 if ($OutputDir) {
     New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $reportPath = Join-Path $OutputDir "chatbot-qq-health-$stamp.json"
     $latestPath = Join-Path $OutputDir "LATEST.json"
     $json | Set-Content -Path $reportPath -Encoding UTF8
@@ -318,6 +359,8 @@ if ($OutputDir) {
         Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
         Remove-Item -Force
 }
+
+Write-AlertState $report $AlertDir $stamp $reportPath
 
 $json
 

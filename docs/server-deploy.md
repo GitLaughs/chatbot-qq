@@ -155,6 +155,10 @@ Generate a machine-readable daily operations report:
 .\scripts\get-chatbot-qq-health-report.ps1
 ```
 
+The report writes JSON snapshots under `backup\health-reports` and alert markers under `backup\health-alerts`.
+`ALERT.json` is updated on every run, `ACTIVE.txt` exists only while the latest report is failing, and timestamped alert text files keep a short failure history.
+Before reading status files, the report also refreshes the Linux integrity check and permission audit.
+
 Install the daily health report task. It runs after the default daily backup time:
 
 ```powershell
