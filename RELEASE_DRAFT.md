@@ -1,21 +1,22 @@
-# chatbot-qq v0.2.8｜integrity status reporting
+# chatbot-qq v0.2.9｜permission hardening audit
 
-This release makes Linux code integrity checks visible to automation instead of only writing log lines.
+This release tightens deployed Linux file permissions and makes permission drift visible in daily health reports.
 
-中文关键词：QQ 机器人防护、代码完整性、SHA256 manifest、status.json、运维报告、cc-connect QQ。
+中文关键词：QQ 机器人防护、Linux 权限审计、代码保护、配置保护、健康报告、cc-connect QQ。
 
 ## Highlights
 
-- Writes `/var/lib/chatbot-qq-integrity/status.json` after integrity initialization, successful verification, or drift detection.
-- Includes integrity status in the operations health report.
-- Fails the operations report when integrity status is missing or reports drift.
-- Shows integrity summary in `scripts/check-napcat-server.ps1`.
+- Adds `deploy/linux/chatbot-qq-permission-audit.sh`.
+- Deployment runs permission repair after extracting archives from Windows.
+- Critical code paths are checked for group/other writability.
+- `/etc/chatbot-qq.env`, `/root/.cc-connect-qq`, and `/root/.cc-connect-qq/config.toml` are checked for restrictive modes.
+- Permission audit status is included in the operations health report and server check summary.
 
 ## Verify
 
 ```bash
-systemctl start chatbot-qq-integrity-check.service
-cat /var/lib/chatbot-qq-integrity/status.json
+/opt/chatbot-qq/deploy/linux/chatbot-qq-permission-audit.sh --fix
+cat /var/lib/chatbot-qq-integrity/permissions.json
 ```
 
 ```powershell
@@ -27,13 +28,14 @@ git diff --check
 
 Expected:
 
-- Integrity status reports `"ok": true` and state `ok` after a verification run.
-- The operations report contains `"ok": true` only when service health, backup health, and integrity status are all healthy.
+- Permission status reports `"ok": true`, `state: "ok"`, and `violation_count: 0`.
+- Critical code files are not group/other writable.
+- The operations report remains healthy only when service, backup, integrity, and permission checks all pass.
 
 ## Deployment Notes
 
-- Rebuild the manifest after intentional deployment by deleting `/var/lib/chatbot-qq-integrity/sha256sums.txt` and running the integrity check once.
-- Treat `state: "drift"` as a production incident unless it follows an intentional deployment.
+- This release is especially relevant when deploying from Windows archives, which can otherwise leave Linux files too permissive.
+- Real server addresses, QQ IDs, and API keys must stay in ignored local files or operator-provided command arguments.
 
 ## Full Changelog
 

@@ -39,6 +39,7 @@ rm -f /tmp/chatbot-qq-deploy.tar
 find '$RemoteDir/groups' -path '*/scripts/dream.sh' -type f -exec chmod +x {} \;
 chmod +x '$RemoteDir/deploy/linux/chatbot-qq-integrity-check.sh'
 chmod +x '$RemoteDir/deploy/linux/chatbot-qq-cleanup.sh'
+chmod +x '$RemoteDir/deploy/linux/chatbot-qq-permission-audit.sh'
 if [ ! -f '$RemoteConfigDir/config.toml' ]; then
   cp '$RemoteDir/configs/cc-connect.napcat.server.example.toml' '$RemoteConfigDir/config.toml'
 fi
@@ -46,6 +47,7 @@ if [ ! -f /etc/chatbot-qq.env ]; then
   cp '$RemoteDir/deploy/linux/chatbot-qq.env.example' /etc/chatbot-qq.env
   chmod 600 /etc/chatbot-qq.env
 fi
+'$RemoteDir/deploy/linux/chatbot-qq-permission-audit.sh' --fix
 cd '$RemoteDir'
 if command -v npm >/dev/null 2>&1; then
   npm install --omit=dev

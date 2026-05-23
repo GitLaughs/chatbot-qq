@@ -7,6 +7,18 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-05-23
+
+### Added
+
+- Added Linux permission audit and repair for deployed code and config paths.
+- Added permission audit status to the operations health report and server check summary.
+
+### Changed
+
+- Deployment now tightens code/config permissions after extracting Windows-built archives.
+- Operations reports now fail when permission audit status is missing or reports writable critical paths.
+
 ## [0.2.8] - 2026-05-23
 
 ### Added

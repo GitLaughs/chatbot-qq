@@ -197,6 +197,7 @@ if ($metricsRaw -notmatch "chatbot_qq_up 1") {
 $integrityTail = Invoke-RemoteText "tail -n 5 /var/log/chatbot-qq-integrity.log 2>/dev/null || true"
 $cleanupTail = Invoke-RemoteText "tail -n 5 /var/log/chatbot-qq-cleanup.log 2>/dev/null || true"
 $integrityStatusRaw = Invoke-RemoteText "cat /var/lib/chatbot-qq-integrity/status.json 2>/dev/null || true"
+$permissionStatusRaw = Invoke-RemoteText "cat /var/lib/chatbot-qq-integrity/permissions.json 2>/dev/null || true"
 $report.logs = [ordered]@{
     integrity_tail = @($integrityTail -split "`n" | Where-Object { $_ })
     cleanup_tail = @($cleanupTail -split "`n" | Where-Object { $_ })
@@ -224,6 +225,29 @@ if ($integrityStatusRaw.Trim()) {
     $failures.Add("integrity status missing") | Out-Null
 }
 
+if ($permissionStatusRaw.Trim()) {
+    try {
+        $permissionStatus = $permissionStatusRaw | ConvertFrom-Json
+        $report.permissions = $permissionStatus
+        if (-not $permissionStatus.ok) {
+            $failures.Add("permission audit is $($permissionStatus.state)") | Out-Null
+        }
+    } catch {
+        $report.permissions = [ordered]@{
+            ok = $false
+            parse_error = $_.Exception.Message
+            raw = $permissionStatusRaw
+        }
+        $failures.Add("permission audit parse failed") | Out-Null
+    }
+} else {
+    $report.permissions = [ordered]@{
+        ok = $false
+        state = "missing"
+    }
+    $failures.Add("permission audit status missing") | Out-Null
+}
+
 $backup = Test-BackupStatus
 $report.backup = $backup
 if (-not $backup.ok) {
@@ -247,6 +271,10 @@ if (-not $IncludeSensitive) {
     if ($report.integrity) {
         $report.integrity.root = Mask-Text $report.integrity.root
         $report.integrity.manifest = Mask-Text $report.integrity.manifest
+    }
+    if ($report.permissions) {
+        $report.permissions.root = Mask-Text $report.permissions.root
+        $report.permissions.violations = @($report.permissions.violations | ForEach-Object { Mask-Text $_ })
     }
     if ($report.backup) {
         $report.backup.server = Mask-Text $report.backup.server
