@@ -1,0 +1,11 @@
+[Unit]
+Description=Run CHATBOT QQ code integrity check
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=30min
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

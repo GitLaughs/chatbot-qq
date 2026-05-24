@@ -1,0 +1,15 @@
+# One keyword per line. Passive 5.4-mini listen only triggers on these,
+# built-in keywords, or member-profile marked keywords.
+OpenClaw
+cc-connect
+NapCat
+OneBot
+焊接
+电路
+模电
+数电
+Verilog
+Vivado
+A1
+竞赛
+集创赛

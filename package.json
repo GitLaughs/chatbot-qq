@@ -1,0 +1,17 @@
+{
+  "name": "chatbot-qq",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "onebot-proxy": "node scripts/onebot-group-proxy.js",
+    "explain:audit-paths": "node scripts/check-private-data-explain-canaries.js --table",
+    "explain:audit-paths:json": "node scripts/check-private-data-explain-canaries.js --json",
+    "explain:publish-paths": "node scripts/check-private-data-explain-canaries.js --table",
+    "explain:route-scope": "node scripts/explain-route-scope.js",
+    "test": "node scripts/test-onebot-proxy-units.js && node scripts/test-private-data-audit.js && node scripts/check-private-data-explain-canaries.js && node scripts/check-route-scope-canaries.js && node scripts/check-memory-rule-canaries.js && node scripts/check-pending-memory-lifecycle-canaries.js && node scripts/check-pending-memory-classification-matrix.js && node scripts/check-memory-rule-change-guard.js && node scripts/check-low-restriction-command-canaries.js && node scripts/check-review-packet-canaries.js && node scripts/check-review-packet-source-isolation-canaries.js && node scripts/check-review-packet-actionable-canaries.js && node scripts/check-review-packet-focus-canaries.js && node scripts/check-review-packet-fallback-safety-canaries.js && node scripts/check-review-packet-real-phrase-canaries.js && node scripts/audit-private-data.js --scope Publish"
+  },
+  "dependencies": {
+    "pdf-parse": "^1.1.1",
+    "ws": "^8.17.1"
+  }
+}

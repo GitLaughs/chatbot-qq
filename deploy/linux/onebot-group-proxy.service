@@ -1,0 +1,35 @@
+[Unit]
+Description=CHATBOT QQ OneBot group proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/chatbot-qq
+EnvironmentFile=-/etc/chatbot-qq.env
+Environment=CODEX_HOME=/opt/chatbot-qq/.cc-connect/codex-home
+Environment=HOME=/opt/chatbot-qq/.cc-connect/codex-home
+ExecStart=/usr/bin/env npm run onebot-proxy
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/chatbot-qq/groups /opt/chatbot-qq/users /opt/chatbot-qq/.cc-connect /var/log
+ReadOnlyPaths=/opt/chatbot-qq/scripts /opt/chatbot-qq/deploy /opt/chatbot-qq/configs
+CapabilityBoundingSet=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+LimitNOFILE=8192
+StandardOutput=append:/var/log/onebot-group-proxy.log
+StandardError=append:/var/log/onebot-group-proxy.log
+
+[Install]
+WantedBy=multi-user.target

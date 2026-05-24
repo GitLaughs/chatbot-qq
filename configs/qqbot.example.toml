@@ -1,0 +1,17 @@
+[qqbot]
+app_id = "YOUR_QQ_BOT_APP_ID"
+client_secret = "YOUR_QQ_BOT_CLIENT_SECRET"
+sandbox = true
+intents = 0
+
+[runtime]
+log_level = "info"
+echo = false
+webhook_url = ""
+webhook_token = ""
+
+[filters]
+allow_groups = []
+allow_users = []
+require_at = true
+

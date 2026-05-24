@@ -1,0 +1,66 @@
+{
+  "max_file_bytes": 2097152,
+  "common_exclude_dirs": [".git", "node_modules", "tmp", "backup", "tools", ".cc-connect"],
+  "publish_exclude_dirs": ["memory", "runs", "users"],
+  "publish_exclude_file_names": [
+    "chatbot-qq-qrcode.png",
+    "cc-connect.napcat.local.toml",
+    ".env",
+    "NapCat.json"
+  ],
+  "publish_exclude_extensions": [".log", ".sqlite", ".sqlite3", ".db", ".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip"],
+  "publish_exclude_path_patterns": [
+    "^groups/[^/]+/(memory|local_files|files)(/|$)"
+  ],
+  "publish_exclude_file_name_patterns": [
+    "\\.local\\.toml$",
+    "\\.local\\.toml\\.lock$"
+  ],
+  "forbidden_file_names": ["cc-connect.napcat.local.toml", ".env", "NapCat.json"],
+  "patterns": [
+    {
+      "name": "secret token",
+      "regex": "sk-[A-Za-z0-9_-]{20,}|access[_-]?token\\s*[:=]\\s*[\"']?[A-Za-z0-9_.-]{16,}|app(secret)?\\s*[:=]\\s*[\"']?[A-Za-z0-9_-]{12,}"
+    },
+    {
+      "name": "local config",
+      "regex": "NapCat\\.json|onebot11_[A-Za-z0-9_-]+\\.json"
+    },
+    {
+      "name": "runtime memory",
+      "regex": "memory[\\\\/].*chat-\\d{4}-\\d{2}-\\d{2}\\.jsonl|members[\\\\/]\\d+\\.md|users[\\\\/]\\d+"
+    }
+  ],
+  "allowed_findings": [
+    {
+      "id": "example-runtime-memory",
+      "type": "runtime memory",
+      "max_matches": 10,
+      "path_patterns": [
+        "^configs/.*\\.example\\.toml$",
+        "^docs/",
+        "^deploy/linux/chatbot-qq\\.env\\.example$"
+      ]
+    },
+    {
+      "id": "audit-rule-local-config-literals",
+      "type": "local config",
+      "max_matches": 4,
+      "path_patterns": [
+        "^configs/private-data-audit-rules\\.json$",
+        "^scripts/audit-private-data\\.ps1$",
+        "^scripts/audit-private-data\\.js$",
+        "^scripts/lib/private-data-audit\\.js$"
+      ]
+    },
+    {
+      "id": "gitignore-local-config-literals",
+      "type": "local config",
+      "max_matches": 2,
+      "path_patterns": [
+        "^\\.gitignore$"
+      ]
+    }
+  ],
+  "live_warning_types": ["forbidden local file", "local config", "runtime memory"]
+}
