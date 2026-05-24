@@ -79,6 +79,19 @@ function Assert-HashtableEqual($Expected, $Actual, $Label) {
   }
 }
 
+function Invoke-NodeAuditExpectFailure($Arguments, $Reason) {
+  $previousErrorActionPreference = $ErrorActionPreference
+  $exitCode = $null
+  try {
+    $ErrorActionPreference = "Continue"
+    & node @Arguments 2>$null | Out-Null
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+  if ($exitCode -eq 0) { throw "Node audit should reject $Reason" }
+}
+
 function Assert-AllowedSummaryEquivalent($Expected, $Actual, $Label) {
   $expectedById = @{}
   foreach ($item in @($Expected)) {
@@ -231,8 +244,7 @@ try {
   function Assert-BadRulesRejectedByBoth($Name, $Json, $Reason) {
     $rulesFile = Join-Path $auditTestRoot "$Name-rules.json"
     Set-Content -LiteralPath $rulesFile -Value $Json -Encoding UTF8
-    node $nodeAuditScript --root $auditTestRoot --rules $rulesFile --scope Publish --json 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) { throw "Node audit should reject $Reason" }
+    Invoke-NodeAuditExpectFailure @($nodeAuditScript, "--root", $auditTestRoot, "--rules", $rulesFile, "--scope", "Publish", "--json") $Reason
     $psRejected = $false
     try {
       & $auditScript -Root $auditTestRoot -RulesPath $rulesFile -Scope Publish -Json | Out-Null
@@ -361,8 +373,7 @@ try {
 
   $badRulesSecret = Join-Path $auditTestRoot "bad-secret-rules.json"
   Set-Content -LiteralPath $badRulesSecret -Value '{"allowed_findings":[{"id":"bad-secret-token","type":"secret token","max_matches":1,"path_patterns":["^configs/private-data-audit-rules\\.json$"]}]}' -Encoding UTF8
-  node $nodeAuditScript --root $auditTestRoot --rules $badRulesSecret --scope Publish --json 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) { throw "Node audit should reject secret token allowed_findings" }
+  Invoke-NodeAuditExpectFailure @($nodeAuditScript, "--root", $auditTestRoot, "--rules", $badRulesSecret, "--scope", "Publish", "--json") "secret token allowed_findings"
   $badSecretRejected = $false
   try {
     & $auditScript -Root $auditTestRoot -RulesPath $badRulesSecret -Scope Publish -Json | Out-Null
@@ -373,8 +384,7 @@ try {
 
   $badRulesBroad = Join-Path $auditTestRoot "bad-broad-rules.json"
   Set-Content -LiteralPath $badRulesBroad -Value '{"allowed_findings":[{"id":"bad-broad-pattern","type":"local config","max_matches":1,"path_patterns":["^.*$"]}]}' -Encoding UTF8
-  node $nodeAuditScript --root $auditTestRoot --rules $badRulesBroad --scope Publish --json 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) { throw "Node audit should reject broad allowed_findings path patterns" }
+  Invoke-NodeAuditExpectFailure @($nodeAuditScript, "--root", $auditTestRoot, "--rules", $badRulesBroad, "--scope", "Publish", "--json") "broad allowed_findings path patterns"
   $badBroadRejected = $false
   try {
     & $auditScript -Root $auditTestRoot -RulesPath $badRulesBroad -Scope Publish -Json | Out-Null
@@ -385,8 +395,7 @@ try {
 
   $badRulesDuplicate = Join-Path $auditTestRoot "bad-duplicate-rules.json"
   Set-Content -LiteralPath $badRulesDuplicate -Value '{"allowed_findings":[{"id":"duplicate","type":"local config","max_matches":1,"path_patterns":["^configs/private-data-audit-rules\\.json$"]},{"id":"duplicate","type":"runtime memory","max_matches":1,"path_patterns":["^configs/.*\\.example\\.toml$"]}]}' -Encoding UTF8
-  node $nodeAuditScript --root $auditTestRoot --rules $badRulesDuplicate --scope Publish --json 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) { throw "Node audit should reject duplicate allowed_findings ids" }
+  Invoke-NodeAuditExpectFailure @($nodeAuditScript, "--root", $auditTestRoot, "--rules", $badRulesDuplicate, "--scope", "Publish", "--json") "duplicate allowed_findings ids"
   $badDuplicateRejected = $false
   try {
     & $auditScript -Root $auditTestRoot -RulesPath $badRulesDuplicate -Scope Publish -Json | Out-Null
@@ -397,8 +406,7 @@ try {
 
   $badRulesNullBudget = Join-Path $auditTestRoot "bad-null-budget-rules.json"
   Set-Content -LiteralPath $badRulesNullBudget -Value '{"allowed_findings":[{"id":"null-budget","type":"local config","max_matches":null,"path_patterns":["^configs/private-data-audit-rules\\.json$"]}]}' -Encoding UTF8
-  node $nodeAuditScript --root $auditTestRoot --rules $badRulesNullBudget --scope Publish --json 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) { throw "Node audit should reject null max_matches" }
+  Invoke-NodeAuditExpectFailure @($nodeAuditScript, "--root", $auditTestRoot, "--rules", $badRulesNullBudget, "--scope", "Publish", "--json") "null max_matches"
   $badNullBudgetRejected = $false
   try {
     & $auditScript -Root $auditTestRoot -RulesPath $badRulesNullBudget -Scope Publish -Json | Out-Null

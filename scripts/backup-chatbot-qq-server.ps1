@@ -26,37 +26,46 @@ if ($InstallScheduledTask) {
 
 New-Item -ItemType Directory -Force -Path $LocalBackupDir | Out-Null
 
+function Quote-BashArg([string]$Value) {
+    return "'" + ($Value -replace "'", "'`"`"`'") + "'"
+}
+
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $remoteArchive = "/tmp/chatbot-qq-backup-$stamp.tar.gz"
 $localArchive = Join-Path $LocalBackupDir "chatbot-qq-server-$stamp.tar.gz"
 $manifest = Join-Path $LocalBackupDir "MANIFEST-$stamp.txt"
 $latestStatus = Join-Path $LocalBackupDir "LATEST.json"
-$secretArgs = if ($IncludeSecrets) { "/etc/chatbot-qq.env '$RemoteConfigDir/config.toml'" } else { "" }
+$backupPaths = @(
+    "$RemoteDir/groups",
+    "$RemoteDir/users",
+    "$RemoteDir/.cc-connect",
+    "$RemoteDir/package.json",
+    "$RemoteDir/package-lock.json",
+    "$RemoteDir/AGENTS.md",
+    "$RemoteDir/docs"
+)
+if ($IncludeSecrets) {
+    $backupPaths += "/etc/chatbot-qq.env"
+    $backupPaths += "$RemoteConfigDir/config.toml"
+}
+$remoteCommand = @(
+    "set -eu",
+    "test $(Quote-BashArg $RemoteDir) != '/'",
+    "test -d $(Quote-BashArg $RemoteDir)",
+    "rm -f $(Quote-BashArg $remoteArchive)",
+    "tar --warning=no-file-changed --ignore-failed-read --exclude=$(Quote-BashArg "$RemoteDir/tools") --exclude=$(Quote-BashArg "$RemoteDir/*.log") --exclude=$(Quote-BashArg "$RemoteDir/backup") -czf $(Quote-BashArg $remoteArchive) $(($backupPaths | ForEach-Object { Quote-BashArg $_ }) -join ' ')",
+    "chmod 600 $(Quote-BashArg $remoteArchive)"
+) -join "; "
 
-ssh $Server @"
-set -euo pipefail
-test '$RemoteDir' != '/'
-test -d '$RemoteDir'
-rm -f '$remoteArchive'
-tar \
-  --warning=no-file-changed \
-  --ignore-failed-read \
-  --exclude='$RemoteDir/tools' \
-  --exclude='$RemoteDir/*.log' \
-  --exclude='$RemoteDir/backup' \
-  -czf '$remoteArchive' \
-  '$RemoteDir/groups' \
-  '$RemoteDir/users' \
-  '$RemoteDir/.cc-connect' \
-  '$RemoteDir/package.json' \
-  '$RemoteDir/package-lock.json' \
-  '$RemoteDir/AGENTS.md' \
-  '$RemoteDir/docs' \
-  $secretArgs
-chmod 600 '$remoteArchive'
-"@
+ssh $Server $remoteCommand
+if ($LASTEXITCODE -ne 0) {
+    throw "Remote backup archive creation failed"
+}
 
 scp "${Server}:$remoteArchive" $localArchive
+if ($LASTEXITCODE -ne 0) {
+    throw "Backup download failed"
+}
 ssh $Server "rm -f '$remoteArchive'"
 
 $hash = Get-FileHash -Algorithm SHA256 -Path $localArchive

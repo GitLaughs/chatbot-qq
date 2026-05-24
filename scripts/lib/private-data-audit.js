@@ -133,7 +133,7 @@ function normalizeScope(scope) {
 
 function loadRules(rulesPath) {
   const file = path.resolve(rulesPath || DEFAULT_RULES_PATH);
-  const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  const raw = JSON.parse(stripUtf8Bom(fs.readFileSync(file, "utf8")));
   validateRuleConfig(raw);
   return {
     max_file_bytes: Number(raw.max_file_bytes) || 2 * 1024 * 1024,
@@ -153,6 +153,10 @@ function loadRules(rulesPath) {
     })),
     live_warning_types: raw.live_warning_types || []
   };
+}
+
+function stripUtf8Bom(text) {
+  return String(text || "").replace(/^\uFEFF/, "");
 }
 
 function validateRuleConfig(raw) {
