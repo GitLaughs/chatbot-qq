@@ -12,26 +12,25 @@ This release brings the publish notes and beginner Linux installer in line with 
 - Documents the optional provider-failover timer as an advanced path that should only be enabled after matching providers exist in `config.toml`.
 - Refreshes the Linux install guide so first-time deploys and server updates use the same current flow.
 
+## Required Runtime
+
+This release packages deployment templates and helper scripts for the NapCat / OneBot + onebot-group-proxy + cc-connect route. The bundled Linux service and timer units require a systemd host with Node.js, npm, cc-connect, and a local OneBot v11 WebSocket endpoint from NapCat. Image rendering for long replies and formula-heavy replies requires ImageMagick and a CJK font such as Noto CJK on the host.
+
 ## Verify
 
 ```powershell
-npm test
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
 git diff --check
 ```
 
-Server-side validation:
+Expected:
 
-- `bash -n scripts/install-linux.sh`
-- `bash -n deploy/linux/chatbot-qq-integrity-check.sh`
-- `bash -n deploy/linux/chatbot-qq-cleanup.sh`
-- `bash ./scripts/install-linux.sh --install-services --no-npm`
-- `systemctl daemon-reload`
-- `systemctl restart onebot-group-proxy cc-connect-qq`
-- `systemctl list-timers 'chatbot-qq-*' --no-pager`
-- Confirm `http://127.0.0.1:3010/healthz` returns HTTP 200.
+- Go tests, Node syntax checks, OneBot proxy unit checks, and private-data audit checks pass.
+- Linux install checks run when a usable bash exists; otherwise they are skipped by the Windows test wrapper.
+- The private-data audit passes for the publish scope, with only allowed example/runtime findings.
 
-## Deployment Notes
+## Attribution
 
-- Deploy `scripts/install-linux.sh`, `docs/install-linux.zh-CN.md`, `deploy/linux/*`, `RELEASE_DRAFT.md`, and `CHANGELOG.md`.
-- Run the installer once after pulling this release so service files, permissions, and the integrity baseline match the deployed code.
-- Keep API keys, NapCat access tokens, provider keys, real local config, and private logs in ignored server files only.
+This project is a QQ deployment/configuration layer around
+[cc-connect](https://github.com/chenhg5/cc-connect), which is MIT licensed.
+See `NOTICE` and `THIRD_PARTY_NOTICES.md`.
