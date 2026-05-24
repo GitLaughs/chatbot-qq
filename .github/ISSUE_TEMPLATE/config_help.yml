@@ -1,0 +1,23 @@
+name: Config help
+description: Ask for help with a sanitized setup.
+title: "[Config]: "
+labels: ["config", "question"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What are you trying to deploy?
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Sanitized config
+      description: Replace secrets, openids, group IDs, tokens, and local private paths before posting.
+      render: toml
+  - type: textarea
+    id: checks
+    attributes:
+      label: Checks already run
+      placeholder: npm test, check scripts, systemctl status, NapCat WebSocket status

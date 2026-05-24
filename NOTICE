@@ -1,0 +1,10 @@
+chatbot-qq
+
+This repository contains QQ adapter and deployment glue for cc-connect bot
+workflows. It does not vendor cc-connect itself.
+
+cc-connect is maintained separately at:
+https://github.com/chenhg5/cc-connect
+
+NapCat / OneBot integrations are optional adapter paths. Prefer QQ official bot
+APIs when production gateway access is available.
