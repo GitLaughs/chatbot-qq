@@ -1,5 +1,6 @@
 {
   "name": "chatbot-qq",
+  "version": "0.2.18",
   "private": true,
   "type": "commonjs",
   "scripts": {

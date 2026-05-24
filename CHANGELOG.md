@@ -16,6 +16,19 @@ versioning once public releases begin.
 
 - Clarified the default group workspace instructions for warm, natural, profile-aware replies.
 
+## [0.2.18] - 2026-05-24
+
+### Added
+
+- Added current cloud Linux server defaults to the beginner Linux installer, including OneBot health checks, send retry settings, ImageMagick rendering, command toggles, and retention policy.
+- Added maintenance timer installation for Linux code integrity checks and runtime cleanup when `scripts/install-linux.sh --install-services` is used.
+- Documented the optional provider-failover timer as an advanced install path that requires matching cc-connect provider blocks first.
+
+### Changed
+
+- Updated the Linux install guide so first-time installs and server updates both refresh systemd units, repair permissions, and rebuild the integrity baseline.
+- Refreshed the release draft for the cloud Linux deployment update.
+
 ## [0.2.17] - 2026-05-23
 
 ### Fixed

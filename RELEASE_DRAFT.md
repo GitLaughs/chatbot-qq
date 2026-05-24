@@ -1,15 +1,16 @@
-# chatbot-qq v0.2.17｜QQ group image and sticker recognition
+# chatbot-qq v0.2.18｜Cloud Linux server install refresh
 
-This release fixes a OneBot/NapCat compatibility path where group images or sticker packages could arrive only as raw CQ message text and fail to reach the agent as visual segments.
+This release brings the publish notes and beginner Linux installer in line with the current cloud-server deployment path for NapCat / OneBot + onebot-group-proxy + cc-connect.
 
-中文关键词：QQ 群机器人、图片识别、表情包识别、OneBot、NapCat、CQ 码。
+中文关键词：QQ 群机器人、Linux 部署、NapCat、OneBot、cc-connect、systemd、完整性检查、权限审计。
 
 ## Highlights
 
-- Parses raw CQ `image`, `mface`, `marketface`, `bface`, and `face` segments when no structured message array is present.
-- Converts image-like sticker packages with URLs into image segments so the agent can inspect them.
-- Prefers usable image URLs for forwarded image file sources.
-- Adds unit coverage for raw CQ image and sticker normalization.
+- Updates the beginner Linux installer to write the current server env defaults for health checks, retry behavior, image rendering, command switches, and retention policy.
+- Installs the Linux maintenance timers for code integrity checks and runtime cleanup when `--install-services` is used.
+- Runs the Linux permission audit repair during service installation and refreshes the integrity baseline after intentional updates.
+- Documents the optional provider-failover timer as an advanced path that should only be enabled after matching providers exist in `config.toml`.
+- Refreshes the Linux install guide so first-time deploys and server updates use the same current flow.
 
 ## Verify
 
@@ -20,14 +21,17 @@ git diff --check
 
 Server-side validation:
 
-- `node --check scripts/onebot-group-proxy.js`
-- `node --check scripts/test-onebot-proxy-units.js`
-- `npm test`
-- Restart `onebot-group-proxy` and `cc-connect-qq`.
-- Confirm the local health endpoint returns HTTP 200.
+- `bash -n scripts/install-linux.sh`
+- `bash -n deploy/linux/chatbot-qq-integrity-check.sh`
+- `bash -n deploy/linux/chatbot-qq-cleanup.sh`
+- `bash ./scripts/install-linux.sh --install-services --no-npm`
+- `systemctl daemon-reload`
+- `systemctl restart onebot-group-proxy cc-connect-qq`
+- `systemctl list-timers 'chatbot-qq-*' --no-pager`
+- Confirm `http://127.0.0.1:3010/healthz` returns HTTP 200.
 
 ## Deployment Notes
 
-- Deploy `scripts/onebot-group-proxy.js` and `scripts/test-onebot-proxy-units.js`.
-- After production deployment, refresh the server integrity manifest for these two files and run the integrity check.
-- Real server addresses, QQ IDs, and API keys must stay in ignored local files or operator-provided environment variables.
+- Deploy `scripts/install-linux.sh`, `docs/install-linux.zh-CN.md`, `deploy/linux/*`, `RELEASE_DRAFT.md`, and `CHANGELOG.md`.
+- Run the installer once after pulling this release so service files, permissions, and the integrity baseline match the deployed code.
+- Keep API keys, NapCat access tokens, provider keys, real local config, and private logs in ignored server files only.
