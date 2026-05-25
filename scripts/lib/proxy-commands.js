@@ -7,7 +7,7 @@ const { formatGrowthReport, seedGrowthProposals, workspaceGrowthReport } = requi
 const { fileStats, formatFileList, formatFileStats, readFileIndex, recentFiles, searchFiles } = require("./file-index");
 const { formatMemoryCandidates, formatMemoryRuleGuide, formatMemoryRuleInspection, inspectMemoryRule, memoryCandidatesFromSamples } = require("./memory-rules");
 const { formatPolicyDrift, scanPolicyDrift } = require("./policy-drift");
-const { addMemory, applyPendingCandidates, applyPendingCandidatesWith, comparePendingCandidateSnapshot, diffPendingCandidateSnapshot, formatMemories, formatMemoryEvidence, formatMemoryStats, formatPendingCandidates, formatPendingCandidateApplyResult, formatPendingCandidateBatchResult, formatPendingCandidateHealth, formatPendingCandidateSearch, formatPendingCandidateSnapshot, formatPendingCandidateSnapshotCompare, formatPendingCandidateSnapshotDiff, formatPendingCandidateStats, formatPendingCandidateTriage, formatRecentMemories, inferKind, latestPendingCandidateSnapshot, memoryStats, pendingCandidateHealth, pendingCandidateSnapshot, pendingCandidateStats, pendingCandidateTriage, processPendingCandidatesBatch, readPendingCandidates, savePendingCandidates, searchMemories, searchMemoryEvidence, searchPendingCandidates, skipPendingCandidates, softDeleteMemories } = require("./memory-store");
+const { addGlobalMemory, addMemory, applyPendingCandidates, applyPendingCandidatesWith, comparePendingCandidateSnapshot, diffPendingCandidateSnapshot, formatRankedMemories, formatMemoryEvidence, formatMemoryStats, formatPendingCandidates, formatPendingCandidateApplyResult, formatPendingCandidateBatchResult, formatPendingCandidateHealth, formatPendingCandidateSearch, formatPendingCandidateSnapshot, formatPendingCandidateSnapshotCompare, formatPendingCandidateSnapshotDiff, formatPendingCandidateStats, formatPendingCandidateTriage, formatRecentMemories, inferKind, latestPendingCandidateSnapshot, memoryStats, pendingCandidateHealth, pendingCandidateSnapshot, pendingCandidateStats, pendingCandidateTriage, processPendingCandidatesBatch, readPendingCandidates, savePendingCandidates, searchMemories, searchMemoriesRanked, searchMemoryEvidence, searchPendingCandidates, skipPendingCandidates, softDeleteMemories } = require("./memory-store");
 const { addProposal, addProposalLink, checkProposal, exportProposals, formatDuplicateProposal, formatLandableProposals, formatProposal, formatProposalCheck, formatProposalExport, formatProposalLinkResult, formatProposalLinksCommand, formatProposals, formatProposalStats, formatRoundProposal, getProposal, listLandableProposals, listProposals, pickProposalForRound, proposalStats, searchProposals, updateProposalStatus } = require("./proposal-store");
 const { formatRecentErrors, readRecentErrors, recentErrorStats } = require("./recent-errors");
 const { deleteRota, formatRotaCreated, formatRotas, listActiveRotas } = require("./rota-scheduler");
@@ -29,7 +29,7 @@ const COMMAND_NAMES = [
   "/status", "状态",
   "/files", "files",
   "/文件", "文件",
-  "/记住", "记住",
+  "/记住", "记住", "/全局记住", "全局记住",
   "/memory", "memory", "/记忆", "记忆",
   "/证据", "证据", "/为什么这么说", "为什么这么说",
   "/画像", "画像", "/我的偏好", "我的偏好",
@@ -68,6 +68,7 @@ const HELP_ENTRIES = [
   { scope: "all", title: "/files find 关键词", detail: "查共享文件索引", tags: ["文件", "共享", "索引"] },
   { scope: "all", title: "/文件", detail: "查看当前 workspace 文件索引、抽取文本和解析统计", tags: ["文件", "状态", "索引", "抽取", "解析"] },
   { scope: "all", title: "/记住 内容", detail: "手动写入当前用户/群画像；定时画像更新会先读紧凑证据包", tags: ["记忆", "画像", "偏好", "证据包"] },
+  { scope: "all", title: "/全局记住 内容", detail: "显式写入全局知识池，供所有 workspace 补充检索", tags: ["记忆", "全局", "知识池"] },
   { scope: "all", title: "/记忆 关键词", detail: "搜索结构化记忆；/记忆 最近 查看最近记忆", tags: ["记忆", "搜索", "最近"] },
   { scope: "all", title: "/证据 关键词", detail: "查看记忆来源和候选依据", tags: ["记忆", "证据", "为什么"] },
   { scope: "all", title: "/画像", detail: "查看当前群/个人画像", tags: ["画像", "记忆", "偏好"] },
@@ -155,6 +156,8 @@ function createProxyCommands(deps) {
     if (localFiles !== null) return reply(localFileCommand(msg, localFiles));
     const remember = commandBody(msg, ["/记住", "记住"]);
     if (remember !== null) return reply(rememberFact(msg, remember));
+    const globalRemember = commandBody(msg, ["/全局记住", "全局记住"]);
+    if (globalRemember !== null) return reply(globalRememberCommand(msg, globalRemember));
     const memory = commandBody(msg, ["/memory", "memory", "/记忆", "记忆"]);
     if (memory !== null) return reply(searchMemoryCommand(msg, memory));
     const evidence = commandBody(msg, ["/证据", "证据", "/为什么这么说", "为什么这么说"]);
@@ -409,6 +412,14 @@ function createProxyCommands(deps) {
     return "已记住。";
   }
 
+  function globalRememberCommand(msg, body) {
+    const text = String(body || "").trim();
+    if (!text) return "用法：/全局记住 内容（写入全局知识池，所有群可检索）";
+    const result = addGlobalMemory({ text, subject: String(msg.user_id || "") });
+    if (result) return "已写入全局知识池。";
+    return "写入失败，内容可能为空。";
+  }
+
   function searchMemoryCommand(msg, body) {
     const query = String(body || "").trim();
     if (/^(状态|stats|status)$/i.test(query)) {
@@ -444,7 +455,7 @@ function createProxyCommands(deps) {
     }
     const workspace = msg.message_type === "group" ? deps.workspaceForGroup(msg.group_id) : deps.workspaceForPrivateUser(msg.user_id);
     const subject = msg.message_type === "private" ? String(msg.user_id || "") : "";
-    return formatMemories(searchMemories({ workspace, query, subject, limit: 10 }));
+    return deps.maskSensitive(formatRankedMemories(searchMemoriesRanked({ workspace, query, subject, limit: 10 })));
   }
 
   function memoryEvidenceCommand(msg, body) {

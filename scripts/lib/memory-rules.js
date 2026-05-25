@@ -180,6 +180,65 @@ function redactSensitive(value) {
   return redactSecrets(value);
 }
 
+function importanceScore(memory) {
+  const kindWeights = {
+    boundary: 9,
+    preference: 7,
+    project: 6,
+    todo: 5,
+    fact: 4,
+    joke: 3,
+    note: 2
+  };
+  let score = kindWeights[memory && memory.kind] || 5;
+
+  if (memory && memory.confidence && memory.confidence < 0.7) score -= 1;
+  if (memory && memory.source && memory.source.type === "explicit") score += 1;
+
+  const tags = (memory && memory.tags) || [];
+  if (tags.includes("boundary")) score = Math.max(score, 8);
+  if (tags.includes("style")) score = Math.max(score, 6);
+
+  return Math.max(1, Math.min(10, score));
+}
+
+function relevanceScore(memory, query) {
+  const q = String(query || "").toLowerCase().trim();
+  if (!q) return 0;
+  const haystack = [
+    (memory && memory.text) || "",
+    (memory && memory.kind) || "",
+    (memory && memory.scope) || "",
+    (memory && memory.subject) || "",
+    ...((memory && memory.tags) || [])
+  ].join("\n").toLowerCase();
+
+  let score = 0;
+  if (haystack.includes(q)) score += 10;
+
+  const queryTerms = [];
+  const chineseChars = [...new Set((q.match(/[\u4e00-\u9fa5]/g) || []))];
+  if (chineseChars.length > 0) {
+    queryTerms.push(...chineseChars);
+  }
+  queryTerms.push(...(q.match(/[a-z0-9_+-]{2,}/g) || []));
+  if (queryTerms.length > 0) {
+    const matched = queryTerms.filter((term) => haystack.includes(term));
+    score += (matched.length / queryTerms.length) * 5;
+  }
+
+  const queryTags = tagMemory(q);
+  const commonTags = queryTags.filter((t) => ((memory && memory.tags) || []).includes(t));
+  score += commonTags.length * 3;
+
+  const queryKind = classifyMemory(q);
+  if (memory && queryKind === memory.kind && queryKind !== "note") score += 2;
+
+  if (memory && memory.subject && q.includes(String(memory.subject).toLowerCase())) score += 4;
+
+  return score;
+}
+
 module.exports = {
   classifyMemory,
   tagMemory,
@@ -189,5 +248,7 @@ module.exports = {
   formatMemoryCandidates,
   inspectMemoryRule,
   formatMemoryRuleInspection,
-  formatMemoryRuleGuide
+  formatMemoryRuleGuide,
+  importanceScore,
+  relevanceScore
 };

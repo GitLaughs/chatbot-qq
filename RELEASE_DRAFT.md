@@ -1,16 +1,16 @@
-# chatbot-qq v0.2.20｜Public privacy scrub and plugin release
+# chatbot-qq v0.2.21｜Privacy-clean public sync
 
-This release refreshes the public QQ adapter package for NapCat / OneBot + onebot-group-proxy + cc-connect, with sanitized examples, current plugin-platform notes, and beginner install guidance.
+This release syncs the current private QQ adapter workspace into the public package after removing ignored local config, runtime memory, dependency folders, and other private leftovers from the publish workspace.
 
 中文关键词：QQ 群机器人、Linux 部署、NapCat、OneBot、cc-connect、systemd、完整性检查、权限审计。
 
 ## Highlights
 
 - Redacts real QQ user IDs, group IDs, local Windows paths, and startup-wrapper paths from public examples and docs.
-- Updates README and beginner install commands to match the public `GitLaughs/chatbot-qq` repository format.
-- Includes plugin manager and plugin-scoped configuration updates for new QQ bot features.
+- Updates README and the Windows beginner guide with plugin configuration, plugin checks, and publish-scope privacy validation.
+- Includes plugin manager, plugin-scoped configuration, memory tidy/ranking checks, task-agent bridges, OCR helpers, and sanitized sandbox templates.
 - Keeps NapCat / OneBot + onebot-group-proxy + cc-connect as the primary implementation path.
-- Updates publish validation so the release is checked for secrets, local config, runtime logs, private memory, and path leakage.
+- Confirms the release through automated tests, publish-scope private-data audit, full-directory sensitive-pattern scan, and independent sub-agent privacy review.
 
 ## Required Runtime
 

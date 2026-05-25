@@ -16,6 +16,7 @@ Keywords: QQ bot, QQ group bot, Codex group chat, NapCat, OneBot v11, cc-connect
 - private user routing can use an isolated workspace;
 - `/dream` and `做梦` provide bounded workspace maintenance;
 - `/画图`, `/生图`, `/img`, `画图`, and `生图` provide image generation when provider keys are configured;
+- plugin-scoped features live under `plugins/<id>/` and are managed by `scripts/lib/plugin-manager.js`;
 - long replies and formula-heavy replies can be rendered to PNG before sending;
 - Linux service, health, cleanup, and integrity-check timers keep the deployment inspectable.
 
@@ -66,6 +67,7 @@ flowchart LR
 - Static `/dream` / `做梦` workspace maintenance command.
 - Group recurring rota reminders such as weekly duty rotation, created from chat with `/提醒 ...` or explicit @ requests.
 - Platform-layer image generation commands through `scripts/generate-image.js`.
+- Plugin platform with manifest validation, scoped config, admin commands, capability gates, and plugin-local tests.
 - MathJax/SVG renderer for long answers and formula-heavy QQ replies.
 - Health endpoint, outgoing send retry settings, and redacted diagnostics.
 - Linux installer for `/opt/chatbot-qq`, `/root/.cc-connect-qq/config.toml`, and `/etc/chatbot-qq.env`.
@@ -191,6 +193,31 @@ bash ./scripts/install-linux.sh --install-services --enable-provider-failover --
 
 Enable provider failover only after matching providers exist in `config.toml`.
 
+## Plugins
+
+New bot features should be packaged as plugins when practical. Built-in examples include:
+
+- `plugins/dream`: bounded workspace maintenance triggers.
+- `plugins/image`: image generation trigger handling.
+- `plugins/reminder`: recurring reminder hooks.
+
+Create a plugin scaffold:
+
+```powershell
+npm run create:plugin -- my-plugin
+```
+
+Copy `configs/plugins.example.json` to `configs/plugins.json` for shared non-secret defaults, or write machine-specific overrides to `.cc-connect/plugins.local.json`. Local plugin config can enable/disable plugins, scope groups or private users, and tune settings without adding more top-level `ONEBOT_*` globals.
+
+Useful checks:
+
+```powershell
+npm run test:plugins
+npm run plugin:check
+```
+
+See [docs/plugin-platform.md](docs/plugin-platform.md) for manifest fields, hook contracts, permissions, admin commands, and testing rules.
+
 ## OpenToken Subscription Monitor
 
 Use `scripts/monitor-opentoken-subscriptions.js` to read otokapi.com purchase plans and send a chat alert when a configured price or ratio field is below the threshold. It only calls the read-only payment plans endpoint and does not call payment or order APIs. If no token is configured, the script can reuse the local Chrome/Edge `otokapi.com` login token for this read-only check.
@@ -290,6 +317,7 @@ Expected:
   configs/
     cc-connect.napcat.example.toml
     cc-connect.napcat.server.example.toml
+    plugins.example.json
     private-data-audit-rules.json
   deploy/
     linux/
@@ -301,6 +329,10 @@ Expected:
     server-deploy.md
   groups/
     default/
+  plugins/
+    dream/
+    image/
+    reminder/
   scripts/
     install.ps1
     install-linux.sh
@@ -319,6 +351,7 @@ Expected:
 - [Linux 中文安装教程](docs/install-linux.zh-CN.md)
 - [NapCat setup](docs/napcat-setup.md)
 - [Server deploy](docs/server-deploy.md)
+- [Plugin platform](docs/plugin-platform.md)
 - [QQ bot integration plan](docs/qqbot-integration-plan.md)
 - [Official QQ Bot fallback setup](docs/qqbot-auth-and-setup.md)
 - [Daily group product plan](docs/daily-group-product-plan.md)

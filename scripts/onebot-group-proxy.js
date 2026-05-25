@@ -24,11 +24,15 @@ const { runScriptTaskChecks } = require("./lib/script-task-checker");
 const { evaluatePromptInjectionRisk } = require("./lib/prompt-injection-guard");
 const { parseTaskWithModel } = require("./task-agent");
 const { maskSensitive, redactSecrets } = require("./lib/sensitive-redaction");
-const { trackActivity, detectGap, buildContinuityContext, buildReplyChainContext, replyChainMessageIDs, activitySnapshot } = require("./lib/conversation-context");
+const { trackActivity, detectGap, buildContinuityContext, buildReplyChainContext, buildMemoryContextForMessage, replyChainMessageIDs, activitySnapshot } = require("./lib/conversation-context");
+const { deterministicTidy } = require("./lib/memory-tidy");
 const { updatePrivateMood, updateGroupEnergy, formatMoodContext, formatGroupEnergyContext, readMoodState, readGroupEnergyState } = require("./lib/mood-tracker");
 const { detectFeedbackSignal, recordFeedbackSignal, feedbackStats, readSignals, formatFeedbackContext } = require("./lib/feedback-detector");
 const { evaluateGroupEngagement, evaluatePrivateCheckin, buildProactiveContext, formatPrivateCheckinMessage, setProactivityLevel, proactivitySnapshot, formatProactivityStatus } = require("./lib/proactive-engager");
 const { appendJSONL, readJSONLShards } = require("./lib/jsonl-shards");
+
+let messagesSinceLastTidy = 0;
+let lastTidyTime = Date.now();
 
 let WebSocket;
 try {
@@ -1188,6 +1192,10 @@ function enrichMessageForAgent(msg) {
   if (personaContext) {
     contextParts.push({ text: personaContext, priority: 95, kind: "persona" });
   }
+  const memoryContext = safeContext(() => buildMemoryContextForMessageWrapper(msg), "memory");
+  if (memoryContext) {
+    contextParts.push({ text: memoryContext, priority: 85, kind: "memory" });
+  }
   const recentFileContext = safeContext(() => recentGroupFilesContextForMessage(msg), "recent-group-files");
   if (recentFileContext) {
     contextParts.push({ text: recentFileContext, priority: 118, kind: "recent-group-files" });
@@ -1499,6 +1507,16 @@ function buildContinuityContextForMessage(msg, options = {}) {
 function buildReplyChainContextForMessage(msg) {
   const workspace = msg.message_type === "private" ? workspaceForPrivateUser(msg.user_id) : workspaceForGroup(msg.group_id);
   return buildReplyChainContext({ workspace, msg });
+}
+
+function buildMemoryContextForMessageWrapper(msg) {
+  if (msg.message_type !== "group" && msg.message_type !== "private") return "";
+  const workspace = msg.message_type === "private" ? workspaceForPrivateUser(msg.user_id) : workspaceForGroup(msg.group_id);
+  const messageTextValue = (msg.raw_message || messageText(msg)).replace(/\[CQ:[^\]]*\]/g, "").trim();
+  const subject = msg.message_type === "private" ? String(msg.user_id || "") : "";
+  const scope = msg.message_type === "private" ? "private" : "group";
+  const scopeID = msg.message_type === "private" ? msg.user_id : msg.group_id;
+  return buildMemoryContextForMessage({ workspace, messageText: messageTextValue, subject, scope, scopeID });
 }
 
 function replyChainMessageIDsForMessage(msg) {
@@ -4747,6 +4765,19 @@ function recordGroupMessage(msg) {
     safeRuntime(() => maybeRecordFeedback(workspace, msg), "feedback");
   }
   touchMemberProfile(workspace, msg);
+  messagesSinceLastTidy += 1;
+  if (messagesSinceLastTidy >= Number(process.env.CHATBOT_QQ_MEMORY_TIDY_INTERVAL_MSGS || 100)) {
+    try {
+      const result = deterministicTidy({ workspace });
+      messagesSinceLastTidy = 0;
+      lastTidyTime = Date.now();
+      if (result.skipped > 0) {
+        console.log(`[memory-tidy] L0 completed: deduped=${result.deduped} expired=${result.expired} skipped=${result.skipped}`);
+      }
+    } catch (err) {
+      console.error("[memory-tidy] L0 error:", err.message);
+    }
+  }
 }
 
 function taskAgentOptions() {

@@ -7,6 +7,18 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.21] - 2026-05-25
+
+### Changed
+
+- Refreshed the public README and Windows beginner guide with plugin configuration, plugin checks, and current publish-scope validation notes.
+- Published the current QQ adapter code, plugin platform, memory tidy/ranking checks, task-agent bridges, OCR helpers, and sanitized sandbox templates from the private workspace.
+
+### Security
+
+- Removed ignored local config, backup config, lock files, runtime memory, dependency folders, and pycache leftovers from the publish workspace before release.
+- Re-ran full publish-scope private-data audit plus an independent sub-agent privacy review before publishing.
+
 ## [0.2.20] - 2026-05-25
 
 ### Added
