@@ -1,8 +1,8 @@
 param(
-    [string]$Server = "root@43.108.37.203",
+    [string]$Server = "root@example.com",
     [string]$RemoteDir = "/opt/chatbot-qq",
     [string]$RemoteConfigDir = "/root/.cc-connect-qq",
-    [string]$LocalBackupDir = "E:\CHATBOT-QQ\backup\server-daily",
+    [string]$LocalBackupDir = "C:\chatbot-qq\backup\server-daily",
     [int]$KeepDays = 14,
     [switch]$IncludeSecrets,
     [switch]$InstallScheduledTask

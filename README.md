@@ -33,8 +33,8 @@ This project keeps the current NapCat / OneBot + onebot-group-proxy + cc-connect
 | Route | Model | Trigger | Job |
 |---|---|---|---|
 | Listen route | `gpt-5.4-mini` by default | allowed group messages with selective trigger rules | classify, stay quiet, handle light work, organize workspace context |
-| @ route | `gpt-5.5` by default | explicit @ / directed tasks | handle complex tasks directly |
-| Private route | `gpt-5.5` by default | allowed private user messages | handle isolated private work |
+| @ route | `gpt-5.4` by default | explicit @ / directed tasks | handle complex tasks directly |
+| Private route | `gpt-5.4` by default; admin `1234500001` stays `gpt-5.5` | allowed private user messages | handle isolated private work |
 
 Official QQ Bot code and docs remain fallback or historical reference only.
 
@@ -64,8 +64,9 @@ flowchart LR
 - Separate mini and deep cc-connect projects with independent session behavior.
 - Optional private-user route with an isolated workspace.
 - Static `/dream` / `做梦` workspace maintenance command.
+- Group recurring rota reminders such as weekly duty rotation, created from chat with `/提醒 ...` or explicit @ requests.
 - Platform-layer image generation commands through `scripts/generate-image.js`.
-- ImageMagick renderer for long answers and formula-heavy QQ replies.
+- MathJax/SVG renderer for long answers and formula-heavy QQ replies.
 - Health endpoint, outgoing send retry settings, and redacted diagnostics.
 - Linux installer for `/opt/chatbot-qq`, `/root/.cc-connect-qq/config.toml`, and `/etc/chatbot-qq.env`.
 - systemd units for `onebot-group-proxy` and `cc-connect-qq`.
@@ -82,7 +83,7 @@ flowchart LR
 - `cc-connect` installed globally
 - NapCat logged in to QQ
 - OneBot v11 WebSocket exposed locally, normally `ws://127.0.0.1:3001`
-- Optional ImageMagick and Noto CJK fonts for PNG rendering
+- Optional ImageMagick, librsvg2-bin, and Noto CJK fonts for PNG rendering
 
 Install `cc-connect`:
 
@@ -108,7 +109,7 @@ The QQ route uses NapCat / OneBot as the active implementation path. See [docs/n
 Clone or copy this repository, then run on Windows:
 
 ```powershell
-cd E:\CHATBOT-QQ
+cd C:\chatbot-qq
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -NoStart
 ```
 
@@ -189,6 +190,19 @@ bash ./scripts/install-linux.sh --install-services --enable-provider-failover --
 
 Enable provider failover only after matching providers exist in `config.toml`.
 
+## OpenToken Subscription Monitor
+
+Use `scripts/monitor-opentoken-subscriptions.js` to read otokapi.com purchase plans and send a Feishu alert when a configured price or ratio field is below the threshold. It only calls the read-only payment plans endpoint and does not call payment or order APIs. If no token is configured, the script can reuse the local Chrome/Edge `otokapi.com` login token for this read-only check.
+
+```powershell
+$env:LARK_CHAT_ID = "oc_xxx"
+npm run monitor:opentoken-subscriptions -- --list-only
+npm run monitor:opentoken-subscriptions -- --dry-run --threshold 10
+npm run monitor:opentoken-subscriptions -- --watch --threshold 0.05
+```
+
+See [docs/opentoken-subscription-monitor.md](docs/opentoken-subscription-monitor.md) for webhook, `lark-cli`, loop, and scheduled-task usage.
+
 ## Expected Chat Behavior
 
 Normal group message:
@@ -216,6 +230,14 @@ Static commands:
 
 - `/dream` and `做梦`: run bounded workspace maintenance.
 - `/画图`, `/生图`, `/img`, `画图`, and `生图`: call image generation when provider keys are configured.
+- `/提醒 每周日晚上7点 A、B、C、D 分别干拖地、厕所、洗手台、轮休`: create a weekly group rota reminder. The proxy checks due reminders itself and sends them to the group.
+
+Background profile updater:
+
+- `chatbot-qq-profile-update.timer` runs every 3 hours on Linux deployments.
+- It invokes `scripts/update-user-profiles.sh --all` with `gpt-5.5` and medium reasoning.
+- It silently reads recent group/private `memory/chat-*.jsonl` records and updates only local group/member/private profile files.
+- Workspaces are skipped when no chat record is newer than the latest successful profile update.
 
 Image generation needs an OpenAI-compatible image API key in the service environment, for example:
 
@@ -225,6 +247,9 @@ OPENAI_API_KEY=replace-me
 ONEBOT_IMAGE_API_MODE=auto
 ONEBOT_IMAGE_IMAGES_MODEL=gpt-image-1
 ```
+
+For cc-switch OpenToken rotation, sync keys with `scripts/sync-server-keys-from-ccswitch.ps1`.
+It writes up to four healthy OpenToken keys into `OPENAI_IMAGE_API_KEYS`, and the OneBot proxy leases one key per image job.
 
 ## Verify
 

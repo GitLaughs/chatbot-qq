@@ -156,7 +156,7 @@ type = "codex"
 [projects.agent.options]
 work_dir = "$workspace"
 mode = "full-auto"
-model = "gpt-5.5"
+model = "gpt-5.4"
 reasoning_effort = "high"
 
 [[projects.platforms]]
@@ -184,7 +184,7 @@ type = "codex"
 [projects.agent.options]
 work_dir = "$private_workspace"
 mode = "full-auto"
-model = "gpt-5.5"
+model = "gpt-5.4"
 reasoning_effort = "high"
 
 [[projects.platforms]]
@@ -209,14 +209,17 @@ ONEBOT_AT_PORT=$at_port
 ONEBOT_HEALTH_HOST=127.0.0.1
 ONEBOT_HEALTH_PORT=$health_port
 ONEBOT_PROXY_STATE_FILE=$remote_dir/.cc-connect/onebot-proxy-state.json
+ONEBOT_NAPCAT_DATA_DIR=$remote_dir/deploy/linux/napcat-data/NapCat
 ONEBOT_OUTGOING_RETRY_MAX=2
 ONEBOT_OUTGOING_RESPONSE_TIMEOUT_MS=12000
 ONEBOT_OUTGOING_RETRY_BASE_DELAY_MS=1200
+ONEBOT_PENDING_FILE_RETRY_DELAY_MS=4000
 
 # Long answers and formula-heavy replies are rendered to PNG before sending.
 ONEBOT_RENDER_IMAGEMAGICK_SCRIPT=$remote_dir/scripts/render-qq-card-imagemagick.js
 ONEBOT_IMAGEMAGICK_CONVERT=$imagemagick_convert
 ONEBOT_RENDER_FONT=$render_font
+ONEBOT_RENDER_MAX_HEIGHT=1200
 
 # Runtime retention. Cleanup runs through chatbot-qq-cleanup.timer when maintenance is installed.
 CHATBOT_QQ_ROOT=$remote_dir
@@ -236,6 +239,21 @@ ONEBOT_LISTEN_TRIGGER_MODE=selective
 ONEBOT_LISTEN_TRIGGER_KEYWORDS=bot,机器人,助手,codex,qqbot,qq bot,帮我,帮忙,能不能,可以帮,求助,看看,看一下,分析,总结,建议,怎么,为什么,咋,如何,是否,是不是,吗,？,?,报错,错误,失败,修一下,改一下,代码,脚本,实验,作业,报告
 ONEBOT_PROFILE_REPLY_MARKERS=触发回复,需要回复,关注点,未解决,重要信息
 
+# Intelligence upgrade. Deterministic local state only; no per-message LLM work.
+ONEBOT_CONTINUITY_ENABLED=1
+ONEBOT_CONTINUITY_GAP_MINUTES=30
+ONEBOT_CONTINUITY_MESSAGE_LIMIT=10
+ONEBOT_MOOD_ENABLED=1
+ONEBOT_MOOD_HISTORY_LIMIT=10
+ONEBOT_ENERGY_WINDOW_MS=300000
+ONEBOT_FEEDBACK_ENABLED=1
+ONEBOT_FEEDBACK_WINDOW_SECONDS=300
+ONEBOT_PROACTIVE_ENABLED=1
+ONEBOT_PROACTIVE_LEVEL=normal
+ONEBOT_PROACTIVE_COOLDOWN_MS=900000
+ONEBOT_PROACTIVE_CHECKIN_HOURS=4
+ONEBOT_PROACTIVE_CHECKIN_INTERVAL_MS=1800000
+
 # Optional group commands.
 ONEBOT_DREAM_COMMAND_ENABLED=1
 ONEBOT_DREAM_TRIGGERS=/dream,做梦
@@ -244,7 +262,8 @@ ONEBOT_IMAGE_COMMAND_ENABLED=1
 ONEBOT_IMAGE_TRIGGERS=/画图,/生图,/img,画图,生图
 ONEBOT_IMAGE_TIMEOUT_MS=600000
 ONEBOT_IMAGE_API_MODE=auto
-ONEBOT_IMAGE_MAX_CONCURRENT_PER_GROUP=2
+ONEBOT_IMAGE_KEY_POOL_MAX=4
+ONEBOT_IMAGE_MAX_CONCURRENT_PER_GROUP=4
 ONEBOT_IMAGE_QUEUE_MAX_PER_GROUP=20
 ONEBOT_IMAGE_MODEL=gpt-5.5
 ONEBOT_IMAGE_IMAGES_MODEL=gpt-image-1
@@ -253,13 +272,48 @@ ONEBOT_IMAGE_QUALITY=medium
 ONEBOT_IMAGE_OUTPUT_FORMAT=png
 # OPENAI_BASE_URL=https://api.openai.com/v1
 # OPENAI_API_KEY=replace-me
+# OPENAI_IMAGE_API_KEYS=key1,key2,key3,key4
+# OPENAI_IMAGE_BASE_URLS=https://api.openai.com/v1,https://api.openai.com/v1,https://api.openai.com/v1,https://api.openai.com/v1
+
+# Natural-language task agent. Model parsing is optional; deterministic
+# fallbacks remain available when parser/executor commands are unset.
+QQ_TASK_TIMEZONE=Asia/Shanghai
+# QQ_TASK_MODEL_PARSER_COMMAND=
+QQ_TASK_MODEL_PARSER_MODEL=gpt-5.4
+QQ_TASK_MODEL_PARSER_MODE=responses
+QQ_TASK_MODEL_PARSER_TIMEOUT_MS=8000
+QQ_TASK_MODEL_PARSER_HTTP_TIMEOUT_MS=30000
+# QQ_TASK_FILE_MODIFIER_COMMAND=
+QQ_TASK_FILE_MODIFIER_TIMEOUT_MS=10000
+# QQ_TASK_SCRIPT_GENERATOR_COMMAND=
+QQ_TASK_SCRIPT_GENERATOR_TIMEOUT_MS=10000
+QQ_TASK_ARTIFACT_MODEL=gpt-5.4
+QQ_TASK_ARTIFACT_MODEL_MODE=responses
+QQ_TASK_ARTIFACT_MODEL_HTTP_TIMEOUT_MS=60000
+QQ_TASK_ARTIFACT_MODEL_MAX_OUTPUT_TOKENS=4096
+# QQ_TASK_DEPLOY_COMMAND=
+QQ_TASK_DEPLOY_TIMEOUT_MS=300000
+# QQ_TASK_DEPLOY_HEALTH_COMMAND=
+QQ_TASK_DEPLOY_HEALTH_TIMEOUT_MS=120000
+
+# Scheduled profile updater and compact evidence packet limits.
+CHATBOT_QQ_PROFILE_UPDATE_MODEL=gpt-5.5
+CHATBOT_QQ_PROFILE_UPDATE_REASONING_EFFORT=medium
+CHATBOT_QQ_PROFILE_UPDATE_LOOKBACK_HOURS=72
+CHATBOT_QQ_EVIDENCE_MAX_CHARS=12000
+CHATBOT_QQ_EVIDENCE_MAX_ITEMS_PER_KIND=8
+CHATBOT_QQ_EVIDENCE_MAX_TEXT_CHARS=220
+CHATBOT_QQ_EVIDENCE_KEEP_DAYS=30
+CHATBOT_QQ_JSONL_SHARD_MAX_BYTES=2097152
 
 # Advanced provider failover. Only enable the timer after matching providers exist in config.toml.
 # QQ_PROVIDER_PRIMARY_NAME=qq-opentoken
 # QQ_PROVIDER_FALLBACK_NAME=qq-mimo-fallback
-# QQ_PROVIDER_SOURCE=cc-switch-second-balance
+# QQ_PROVIDER_SOURCE=cc-switch-highest-balance
 # QQ_OPENTOKEN_BASE_URL=https://otokapi.com
 # QQ_OPENTOKEN_API_KEY=replace-me
+# QQ_OPENTOKEN_MIN_BALANCE=20
+# QQ_OPENTOKEN_MIN_HEALTHY_KEYS=1
 # QQ_MIMO_PROXY_BASE_URL=http://127.0.0.1:18081/v1
 # QQ_MIMO_PROXY_API_KEY=qq-local-mimo
 EOF
@@ -273,6 +327,8 @@ fi
 if [[ "$install_services" -eq 1 ]]; then
   cp "$install_root/deploy/linux/onebot-group-proxy.service" /etc/systemd/system/onebot-group-proxy.service
   cp "$install_root/deploy/linux/cc-connect-qq.service" /etc/systemd/system/cc-connect-qq.service
+  cp "$install_root/deploy/linux/chatbot-qq-profile-update.service" /etc/systemd/system/chatbot-qq-profile-update.service
+  cp "$install_root/deploy/linux/chatbot-qq-profile-update.timer" /etc/systemd/system/chatbot-qq-profile-update.timer
   if [[ "$install_maintenance" -eq 1 ]]; then
     cp "$install_root/deploy/linux/chatbot-qq-integrity-check.service" /etc/systemd/system/chatbot-qq-integrity-check.service
     cp "$install_root/deploy/linux/chatbot-qq-integrity-check.timer" /etc/systemd/system/chatbot-qq-integrity-check.timer
@@ -286,7 +342,7 @@ if [[ "$install_services" -eq 1 ]]; then
   fi
   CHATBOT_QQ_ROOT="$remote_dir" bash "$install_root/deploy/linux/chatbot-qq-permission-audit.sh" --fix || true
   systemctl daemon-reload
-  systemctl enable onebot-group-proxy.service cc-connect-qq.service
+  systemctl enable onebot-group-proxy.service cc-connect-qq.service chatbot-qq-profile-update.timer
   if [[ "$install_maintenance" -eq 1 ]]; then
     systemctl enable chatbot-qq-integrity-check.timer chatbot-qq-cleanup.timer
   fi
@@ -299,6 +355,7 @@ echo "Wrote config: $config_path"
 echo "Wrote env:    $env_path"
 echo "Start NapCat first, then run:"
 echo "  systemctl start onebot-group-proxy cc-connect-qq"
+echo "  systemctl start chatbot-qq-profile-update.timer"
 if [[ "$install_services" -eq 1 && "$install_maintenance" -eq 1 ]]; then
   echo "Maintenance timers installed:"
   echo "  systemctl start chatbot-qq-integrity-check.timer chatbot-qq-cleanup.timer"

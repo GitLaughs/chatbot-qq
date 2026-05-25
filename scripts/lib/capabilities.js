@@ -14,6 +14,10 @@ function createCapabilitySnapshot(deps) {
     dream: checkDream(deps),
     image_generation: checkImage(deps),
     rendering: checkRender(deps),
+    task_agent: checkTaskAgent(deps),
+    task_model_parser: checkOptionalCommand("QQ_TASK_MODEL_PARSER_COMMAND", process.env.QQ_TASK_MODEL_PARSER_COMMAND),
+    task_file_modifier: checkOptionalCommand("QQ_TASK_FILE_MODIFIER_COMMAND", process.env.QQ_TASK_FILE_MODIFIER_COMMAND),
+    task_script_generator: checkOptionalCommand("QQ_TASK_SCRIPT_GENERATOR_COMMAND", process.env.QQ_TASK_SCRIPT_GENERATOR_COMMAND),
     pdf_parse: checkNodeRequire("pdf-parse"),
     curl: checkCommand("curl"),
     node: { ok: true, detail: process.version },
@@ -66,6 +70,8 @@ function formatCapabilitySummary(snapshot) {
       line("onebot_upstream", "OneBot"),
       line("dream", "dream"),
       line("image_generation", "画图"),
+      line("task_agent", "自然任务"),
+      line("task_model_parser", "模型解析"),
       line("rendering", "渲染"),
       line("pdf_parse", "PDF")
     ].join("，")
@@ -106,6 +112,29 @@ function checkImage(deps) {
 function checkRender(deps) {
   const script = deps.renderImageMagickScript || deps.renderScript || "";
   return { ok: Boolean(script && fs.existsSync(script)), detail: script };
+}
+
+function checkTaskAgent(deps) {
+  const root = deps.projectRoot || (deps.workspaceRoot ? path.dirname(deps.workspaceRoot) : process.cwd());
+  const files = [
+    path.join(root, "scripts", "task-agent.js"),
+    path.join(root, "scripts", "lib", "task-agent-pipeline.js"),
+    path.join(root, "scripts", "lib", "task-intent-router.js"),
+    path.join(root, "scripts", "lib", "task-request-store.js"),
+  ];
+  const missing = files.filter((file) => !fs.existsSync(file));
+  return {
+    ok: missing.length === 0,
+    detail: missing.length ? `missing ${missing.map((file) => path.relative(root, file)).join(",")}` : `timezone ${deps.taskTimezone || "Asia/Shanghai"}`,
+  };
+}
+
+function checkOptionalCommand(name, value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return { ok: false, detail: "not configured; deterministic fallback only" };
+  }
+  return { ok: true, detail: `${name} configured` };
 }
 
 function checkNodeRequire(name) {

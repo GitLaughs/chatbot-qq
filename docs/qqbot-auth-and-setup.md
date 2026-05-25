@@ -20,7 +20,7 @@ Do not commit these values.
 ## 2. Create Local Config
 
 ```powershell
-cd E:\CHATBOT-QQ
+cd C:\chatbot-qq
 Copy-Item configs\cc-connect.qqbot.example.toml configs\cc-connect.qqbot.local.toml
 ```
 
@@ -62,7 +62,7 @@ Health check:
 - QQ group messages reach the bot only when the bot is mentioned.
 - Direct user messages use the user's QQ openid as session identity.
 - `share_session_in_channel = false` keeps per-user sessions separate inside a group.
-- The agent workspace is `E:\CHATBOT-QQ\groups\default`.
+- The agent workspace is `C:\chatbot-qq\groups\default`.
 
 ## 5. If Native qqbot Fails
 

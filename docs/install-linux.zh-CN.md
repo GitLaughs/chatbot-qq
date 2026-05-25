@@ -9,7 +9,7 @@
 - `cc-connect` 在 `PATH` 中可用
 - NapCat 已在服务器或同机容器中登录 QQ
 - OneBot v11 WebSocket 监听 `ws://127.0.0.1:3001`
-- 可选：ImageMagick 与 Noto CJK 字体，用于把长回复、公式回复渲染成 QQ 图片
+- 可选：ImageMagick、librsvg2-bin 与 Noto CJK 字体，用于把长回复、公式回复渲染成 QQ 图片
 
 安装依赖：
 
@@ -18,7 +18,7 @@ npm install -g cc-connect
 cc-connect --version
 # Debian/Ubuntu，可选但推荐
 apt-get update
-apt-get install -y imagemagick fonts-noto-cjk
+apt-get install -y imagemagick librsvg2-bin fonts-noto-cjk
 ```
 
 ## 安装
@@ -40,6 +40,7 @@ bash ./scripts/install-linux.sh --install-services
 - `/etc/chatbot-qq.env`
 - `/opt/chatbot-qq/groups/sandbox-<group-id>`
 - systemd 服务 `onebot-group-proxy.service` 和 `cc-connect-qq.service`
+- 画像定时器 `chatbot-qq-profile-update.timer`，每 3 小时用 `gpt-5.5` medium 根据最近群聊/私聊静默更新本地画像；如果没有新聊天早于上次画像更新，会直接跳过以节省资源
 - 维护定时器 `chatbot-qq-integrity-check.timer` 和 `chatbot-qq-cleanup.timer`
 
 默认新手安装会写入这些云端 Linux 运行参数：
@@ -48,6 +49,10 @@ bash ./scripts/install-linux.sh --install-services
 - 发送失败重试与超时参数
 - 长回复/公式回复的 ImageMagick 渲染路径
 - `/dream`、`做梦`、`/画图`、`/生图`、`/img` 命令开关
+- `/help` 分组帮助、命令关键词搜索、`/任务` 自然语言任务状态入口
+- 自然语言任务代理的默认环境变量；未配置模型解析/文件修改/脚本生成命令时，会保留确定性回退或交给 cc-connect 处理
+- 画像更新模型：`gpt-5.5` + medium reasoning，默认读取最近 72 小时聊天记录
+- 紧凑证据包和 JSONL 分片阈值，避免画像/dream 任务直接扫大型原始聊天流水
 - 日志、生成图片、群文件归档的保留天数
 
 如果只是刷新配置和服务文件，不想重新安装 npm 依赖：
@@ -64,6 +69,23 @@ bash ./scripts/install-linux.sh --install-services --enable-provider-failover --
 
 不要在没有配置 `qq-opentoken` / `qq-mimo-fallback` provider 的情况下启用 failover 定时器。
 
+如果使用 OpenToken key 池，QQ 会选择池子里余额最高且生成探测通过的 key，不再为了 Feishu/OpenClaw 预留最高余额 key。
+
+可选任务执行器只在你明确需要自动改文件、生成脚本或确认后部署时配置。不要把 key、token、cookie 或私聊导出的内容写进仓库；这些值只放到服务器上的 `/etc/chatbot-qq.env` 或 cc-connect 本地配置里。
+
+```bash
+# 可选：模型解析自然语言任务
+# QQ_TASK_MODEL_PARSER_COMMAND="node /opt/chatbot-qq/scripts/task-model-parser-bridge.js"
+
+# 可选：自动生成/修改 local_files 下的文件产物
+# QQ_TASK_FILE_MODIFIER_COMMAND="node /opt/chatbot-qq/scripts/artifact-model-bridge.js"
+# QQ_TASK_SCRIPT_GENERATOR_COMMAND="node /opt/chatbot-qq/scripts/artifact-model-bridge.js"
+
+# 可选：管理员确认后才运行的部署/重启命令
+# QQ_TASK_DEPLOY_COMMAND="bash /opt/chatbot-qq/scripts/confirmed-qq-task-deploy.sh"
+# QQ_TASK_DEPLOY_HEALTH_COMMAND="bash /opt/chatbot-qq/scripts/confirmed-qq-task-health.sh"
+```
+
 ## 启动
 
 确认 NapCat 已登录并提供 OneBot：
@@ -77,7 +99,7 @@ ss -ltnp | grep 3001
 ```bash
 systemctl start onebot-group-proxy cc-connect-qq
 systemctl status onebot-group-proxy cc-connect-qq --no-pager
-systemctl start chatbot-qq-integrity-check.timer chatbot-qq-cleanup.timer
+systemctl start chatbot-qq-profile-update.timer chatbot-qq-integrity-check.timer chatbot-qq-cleanup.timer
 systemctl list-timers 'chatbot-qq-*' --no-pager
 ```
 
@@ -111,7 +133,30 @@ git pull
 npm install --omit=dev
 bash ./scripts/install-linux.sh --install-services --no-npm
 systemctl restart onebot-group-proxy cc-connect-qq
-systemctl restart chatbot-qq-integrity-check.timer chatbot-qq-cleanup.timer
+systemctl restart chatbot-qq-profile-update.timer chatbot-qq-integrity-check.timer chatbot-qq-cleanup.timer
 ```
 
 更新后脚本会刷新 systemd 单元、修正代码/配置权限，并重建完整性检查基线。
+
+## systemd 权限下限
+
+不要为了“安全加固”随意收缩 `cc-connect-qq.service` 和 `chatbot-qq-profile-update.service` 的本地命令执行权限。QQ Bot 需要在这些服务里运行 Codex/bubblewrap 沙箱来读取文件、解析 PDF、生成索引和执行本地辅助脚本。
+
+这两个服务必须保留：
+
+- `NoNewPrivileges=false`
+- 不设置空的 `CapabilityBoundingSet=`
+- `RestrictAddressFamilies` 包含 `AF_NETLINK`
+- `ReadWritePaths` 包含 `/opt/chatbot-qq`、`/root/.codex-qq-home`，`cc-connect-qq.service` 还要包含 `/root/.cc-connect-qq`
+
+如果收缩这些权限，可能出现 `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`，导致 `pwd`、`ls`、PDF 解析前的本地命令都无法启动。
+
+任何安全相关改动上线前，至少验证：
+
+```bash
+systemctl restart onebot-group-proxy cc-connect-qq
+systemctl is-active onebot-group-proxy cc-connect-qq
+curl -fsS http://127.0.0.1:3010/healthz
+```
+
+还要在真实 QQ 私聊或群聊里验证文件/PDF、图片渲染、`/status`、`/画像`、`/记住` 和服务重启恢复。

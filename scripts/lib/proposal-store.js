@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { looksSensitive, redactSecrets } = require("./sensitive-redaction");
+const { appendJSONObject, readJSONLShardLines } = require("./jsonl-shards");
 
 const VALID_STATUSES = new Set(["open", "accepted", "skipped", "done"]);
 const VALID_LINK_KINDS = new Set(["command", "test", "file", "error", "proposal"]);
@@ -39,7 +40,7 @@ function addProposal({ workspace, scope, scopeID = "", userID = "", title = "", 
     source_message_id: String(sourceMessageID || "")
   };
   ensureDir(path.dirname(proposalFile(workspace)));
-  fs.appendFileSync(proposalFile(workspace), `${JSON.stringify(item)}\n`, "utf8");
+  appendJSONObject(proposalFile(workspace), item);
   return item;
 }
 
@@ -154,7 +155,7 @@ function updateProposalStatus({ workspace, selector, status, userID = "", reason
     reason: normalizeText(reason).slice(0, 180)
   };
   ensureDir(path.dirname(proposalFile(workspace)));
-  fs.appendFileSync(proposalFile(workspace), `${JSON.stringify(event)}\n`, "utf8");
+  appendJSONObject(proposalFile(workspace), event);
   return { updated: 1, item: { ...item, status: next, status_at: event.time, status_by: event.by, status_reason: event.reason } };
 }
 
@@ -186,7 +187,7 @@ function addProposalLink({ workspace, selector, kind, value, userID = "" }) {
     by: String(userID || "")
   };
   ensureDir(path.dirname(proposalFile(workspace)));
-  fs.appendFileSync(proposalFile(workspace), `${JSON.stringify(event)}\n`, "utf8");
+  appendJSONObject(proposalFile(workspace), event);
   const nextItem = { ...item, links: [...links, { kind: normalizedKind, value: cleanValue, time: event.time, by: event.by }] };
   return { added: 1, reason: "ok", item: nextItem };
 }
@@ -412,13 +413,8 @@ function loadProposalState(workspace) {
 }
 
 function readJSONLinesWithBadCount(file) {
-  if (!fs.existsSync(file)) {
-    return [];
-  }
-  return fs.readFileSync(file, "utf8")
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
+  return readJSONLShardLines(file)
+    .map(({ line }) => {
       try {
         return { ok: true, value: JSON.parse(line) };
       } catch {

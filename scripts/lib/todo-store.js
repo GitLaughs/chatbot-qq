@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { redactSecrets } = require("./sensitive-redaction");
+const { appendJSONObject, readJSONLShardLines } = require("./jsonl-shards");
 
 function todoFile(workspace) {
   return path.join(workspace, "memory", "todos.jsonl");
@@ -37,7 +38,7 @@ function addTodo({ workspace, scope, scopeID = "", userID = "", text, sourceMess
     item.source_proposal_title = normalizeText(sourceProposal.title || "").slice(0, 120);
   }
   ensureDir(path.dirname(todoFile(workspace)));
-  fs.appendFileSync(todoFile(workspace), `${JSON.stringify(item)}\n`, "utf8");
+  appendJSONObject(todoFile(workspace), item);
   return item;
 }
 
@@ -105,7 +106,7 @@ function completeTodos({ workspace, selector, doneBy = "" }) {
       done_at: now,
       done_by: String(doneBy || "")
     };
-    fs.appendFileSync(todoFile(workspace), `${JSON.stringify(event)}\n`, "utf8");
+    appendJSONObject(todoFile(workspace), event);
     doneItems.push({ ...item, done_at: now, done_by: String(doneBy || "") });
   }
   return { done: doneItems.length, items: doneItems };
@@ -211,13 +212,8 @@ function loadTodoState(workspace) {
 }
 
 function readJSONLinesWithBadCount(file) {
-  if (!fs.existsSync(file)) {
-    return [];
-  }
-  return fs.readFileSync(file, "utf8")
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
+  return readJSONLShardLines(file)
+    .map(({ line }) => {
       try {
         return { ok: true, value: JSON.parse(line) };
       } catch {

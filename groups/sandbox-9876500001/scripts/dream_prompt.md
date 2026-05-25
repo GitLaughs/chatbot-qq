@@ -1,4 +1,4 @@
-You are running `/dream` for the QQ group workspace `E:\CHATBOT-QQ\groups\sandbox-171290904`.
+You are running `/dream` for the QQ group workspace `C:\chatbot-qq\groups\sandbox-9876500001`.
 
 Purpose: run a deliberate memory-maintenance pass for this QQ group: orient, gather, consolidate, prune, and report.
 
@@ -27,13 +27,15 @@ Workflow:
 
 1. Orient
    - Read `AGENTS.md`, `INSTRUCTIONS.md`, `KNOWLEDGE.md`, `local_files/INDEX.md`, and recent `memory/*.md` files if present.
-   - Read recent raw group records from `memory/chat-YYYY-MM-DD.jsonl` and `memory/file-events-YYYY-MM-DD.jsonl` as evidence.
+   - Read the compact evidence packet listed in Run context as the chat evidence for this pass.
+   - Do not read raw `memory/chat-YYYY-MM-DD.jsonl` or `memory/file-events-YYYY-MM-DD.jsonl` by default.
    - Build a short map of what the workspace currently knows.
 
 2. Gather
    - Inspect the local file tree under `local_files/` by names, paths, sizes, and obvious text summaries.
    - Inspect `members/` only for stable, message-backed observations.
    - For large files, do not deeply parse content unless an existing index points to a missing summary.
+   - Ignore source-map files unless the user explicitly asks for forensic debugging.
    - Check whether `INDEX.md`, `KNOWLEDGE.md`, member notes, and `memory/YYYY-MM-DD.md` disagree.
 
 3. Consolidate

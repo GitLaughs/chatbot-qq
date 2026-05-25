@@ -86,12 +86,36 @@ For index freshness without a watcher or daemon, run the throttled reindex helpe
 /opt/openclaw/scripts/openclaw-reindex.sh /opt/chatbot-qq
 ```
 
-From Windows, sync the folder to the server without deploying the bundled Windows NapCat package:
+From Windows, first run the local release gate. This is the preferred entry
+point after a batch of local intelligence updates:
 
 ```powershell
-cd E:\CHATBOT-QQ
+cd C:\chatbot-qq
+npm run deploy:check
+```
+
+The readiness gate runs the publish test suite, scans for the known fallback key
+prefix and other high-signal publish secrets, performs a deployment package
+dry-run, and checks cc-switch balances with `-DryRun`. It does not upload files,
+write server config, or restart services. Use it to batch several local
+optimizations together; deploy only after the batch is ready to interrupt QQ
+services briefly.
+
+After the readiness gate passes, sync the folder to the server without deploying
+the bundled Windows NapCat package:
+
+```powershell
 .\scripts\deploy-napcat-server.ps1
 ```
+
+Preview the deployment package without uploading or touching the server:
+
+```powershell
+.\scripts\deploy-napcat-server.ps1 -DryRun
+```
+
+`-DryRun -InstallServices` still only validates the local package and does not
+install systemd units.
 
 Install the isolated systemd service files, but do not start them yet:
 
@@ -120,18 +144,55 @@ ONEBOT_LISTEN_PORT=3002
 ONEBOT_AT_PORT=3003
 ONEBOT_PRIVATE_ROUTES=200000001:3006,200000002:3007,200000003:3008,200000004:3009
 ONEBOT_ACK_EMOJI_ID=76
+ONEBOT_CONTINUITY_ENABLED=1
+ONEBOT_CONTINUITY_GAP_MINUTES=30
+ONEBOT_CONTINUITY_MESSAGE_LIMIT=10
+ONEBOT_MOOD_ENABLED=1
+ONEBOT_MOOD_HISTORY_LIMIT=10
+ONEBOT_ENERGY_WINDOW_MS=300000
+ONEBOT_FEEDBACK_ENABLED=1
+ONEBOT_FEEDBACK_WINDOW_SECONDS=300
+ONEBOT_PROACTIVE_ENABLED=1
+ONEBOT_PROACTIVE_LEVEL=normal
+ONEBOT_PROACTIVE_COOLDOWN_MS=900000
+ONEBOT_PROACTIVE_CHECKIN_HOURS=4
+ONEBOT_PROACTIVE_CHECKIN_INTERVAL_MS=1800000
 ONEBOT_DREAM_COMMAND_ENABLED=1
 ONEBOT_DREAM_TRIGGERS=/dream,做梦
 ONEBOT_DREAM_TIMEOUT_MS=900000
+CHATBOT_QQ_PROFILE_UPDATE_MODEL=gpt-5.5
+CHATBOT_QQ_PROFILE_UPDATE_REASONING_EFFORT=medium
+CHATBOT_QQ_PROFILE_UPDATE_LOOKBACK_HOURS=72
 ONEBOT_IMAGE_COMMAND_ENABLED=1
 ONEBOT_IMAGE_TRIGGERS=/画图,/生图,/img,画图,生图
 ONEBOT_IMAGE_MODEL=gpt-5.5
 ONEBOT_IMAGE_IMAGES_MODEL=gpt-image-1
+ONEBOT_IMAGE_KEY_POOL_MAX=4
+ONEBOT_IMAGE_MAX_CONCURRENT_PER_GROUP=4
 ONEBOT_IMAGE_SIZE=1024x1024
 ONEBOT_IMAGE_QUALITY=medium
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_API_KEY=replace-me
+# OPENAI_IMAGE_API_KEYS=key1,key2,key3,key4
+QQ_OPENTOKEN_MIN_BALANCE=20
 ```
+
+For cc-switch OpenToken deployments, first inspect balances without changing the
+server:
+
+```powershell
+.\scripts\sync-server-keys-from-ccswitch.ps1 -Force -DryRun -MinBalance 20
+```
+
+Only sync keys after reviewing the dry-run output. By default, leave services
+running and avoid `-RestartServices`; apply restarts only when the chat window is
+quiet and the key change must take effect immediately. Ordinary QQ code
+deployments should only restart `onebot-group-proxy` and `cc-connect-qq` after
+the batch is published. Feishu/OpenClaw key rotation is a separate maintenance
+action and should not be coupled to QQ deployments.
+
+QQ provider selection uses the highest-balance healthy OpenToken key available
+in the QQ pool. It does not reserve that key for Feishu/OpenClaw.
 
 Install or start Linux NapCat separately. The bundled `tools/NapCat.Shell.Windows.OneKey` package is Windows-only.
 
@@ -140,7 +201,7 @@ On Ubuntu/Debian servers install the renderer dependencies:
 
 ```bash
 apt-get update
-apt-get install -y imagemagick fonts-noto-cjk
+apt-get install -y imagemagick librsvg2-bin fonts-noto-cjk
 ```
 
 If using Docker, start from:
@@ -158,15 +219,37 @@ systemctl start onebot-group-proxy
 systemctl start cc-connect-qq
 ```
 
-The installed systemd units use a bounded runtime profile, but it must not be tightened further without testing the bot's actual chat features:
+The installed systemd units use a bounded runtime profile, but it must not be tightened further without testing the bot's actual chat features.
 
-- `ProtectSystem=strict` with write access to the known QQ runtime data paths.
-- `NoNewPrivileges=true`, empty `CapabilityBoundingSet`, `PrivateTmp=true`.
+Minimum permission floor for command-capable services:
+
+- `ProtectSystem=strict` with write access to `/opt/chatbot-qq` for command-capable services, because Codex/bubblewrap may initialize repo mount points such as `.git` before running even read-only commands.
+- Most helper services keep `NoNewPrivileges=true`, empty `CapabilityBoundingSet`, and `PrivateTmp=true`.
+- `cc-connect-qq.service` and `chatbot-qq-profile-update.service` are exceptions: they must keep `NoNewPrivileges=false`, must not set an empty `CapabilityBoundingSet=`, and must include `AF_NETLINK`.
+- Reason: Codex/bubblewrap initializes a network loopback inside its command sandbox. If these permissions are reduced, even `pwd`/`ls` can fail before PDF/file inspection starts with errors such as `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`.
 - `chatbot-qq-integrity-check.timer` checks code and deploy files against a SHA256 manifest every 30 minutes and writes `/var/lib/chatbot-qq-integrity/status.json`.
 - `chatbot-qq-permission-audit.sh --fix` tightens deployed code/config permissions and writes `/var/lib/chatbot-qq-integrity/permissions.json`.
 - `chatbot-qq-cleanup.timer` removes old logs and generated runtime artifacts daily with conservative retention defaults.
+- `chatbot-qq-profile-update.timer` runs `gpt-5.5` with medium reasoning every 3 hours to silently update local group/member/private profiles from recent chat JSONL records. It skips workspaces when no chat record is newer than the latest successful profile update.
 
-Do not add stricter sandboxing, path denies, or network restrictions just for hardening. First verify `/status`, `/画像`, `/记住`, `/总结今天`, file/PDF handling, image generation, OneBot reconnect, and `cc-connect-qq` restart recovery in the real self-use group.
+Do not add stricter sandboxing, path denies, capability bounding, or network restrictions just for hardening. Before accepting any security-related tightening, verify all of these on the server:
+
+```bash
+systemd-run --wait --collect \
+  --property=WorkingDirectory=/opt/chatbot-qq \
+  --property=Environment=HOME=/root/.codex-qq-home \
+  --property=Environment=USER=root \
+  --property=NoNewPrivileges=false \
+  --property=PrivateTmp=true \
+  --property=ProtectSystem=strict \
+  --property=ProtectHome=false \
+  --property='ReadWritePaths=/opt/chatbot-qq /root/.cc-connect-qq /root/.codex-qq-home /var/log' \
+  --property='ReadOnlyPaths=/opt/chatbot-qq/AGENTS.md /opt/chatbot-qq/docs /opt/chatbot-qq/configs' \
+  --property=RestrictAddressFamilies='AF_INET AF_INET6 AF_UNIX AF_NETLINK' \
+  /usr/bin/codex sandbox linux -- /bin/sh -lc 'pwd; ls -ld . local_files 2>/dev/null || true'
+```
+
+Then verify `/status`, `/画像`, `/记住`, `/总结今天`, file/PDF handling, image generation, OneBot reconnect, and `cc-connect-qq` restart recovery in the real self-use group.
 
 On the first integrity run, the manifest is initialized under `/var/lib/chatbot-qq-integrity/sha256sums.txt`. After intentional deployment, remove that manifest or run the check once after updating it so the next baseline matches the new code.
 
@@ -181,7 +264,7 @@ CHATBOT_QQ_ARCHIVE_KEEP_DAYS=90
 Local daily backup from Windows:
 
 ```powershell
-cd E:\CHATBOT-QQ
+cd C:\chatbot-qq
 .\scripts\backup-chatbot-qq-server.ps1 -InstallScheduledTask
 ```
 
@@ -214,7 +297,7 @@ By default this backs up group/user workspaces and cc-connect runtime data, but 
 Restore a backup to the server:
 
 ```powershell
-.\scripts\restore-chatbot-qq-server.ps1 -Archive E:\CHATBOT-QQ\backup\server-daily\chatbot-qq-server-YYYYMMDD-HHMMSS.tar.gz -RestartServices
+.\scripts\restore-chatbot-qq-server.ps1 -Archive C:\chatbot-qq\backup\server-daily\chatbot-qq-server-YYYYMMDD-HHMMSS.tar.gz -RestartServices
 ```
 
 Secrets are not restored unless `-RestoreSecrets` is also passed.
@@ -222,7 +305,7 @@ Secrets are not restored unless `-RestoreSecrets` is also passed.
 Dry-run restore test, without touching live `/opt/chatbot-qq`:
 
 ```powershell
-.\scripts\test-restore-chatbot-qq-backup.ps1 -Archive E:\CHATBOT-QQ\backup\server-daily\chatbot-qq-server-YYYYMMDD-HHMMSS.tar.gz
+.\scripts\test-restore-chatbot-qq-backup.ps1 -Archive C:\chatbot-qq\backup\server-daily\chatbot-qq-server-YYYYMMDD-HHMMSS.tar.gz
 ```
 
 Check that Feishu stayed active and QQ ports are isolated:
@@ -230,6 +313,11 @@ Check that Feishu stayed active and QQ ports are isolated:
 ```powershell
 .\scripts\check-napcat-server.ps1
 ```
+
+By default this prints a redacted health summary and log file metadata only. Use
+`.\scripts\check-napcat-server.ps1 -RawHealth` for the full `/healthz` JSON, or
+`.\scripts\check-napcat-server.ps1 -IncludeLogs` when you explicitly need recent
+raw logs.
 
 ## Official QQ Bot Fallback
 

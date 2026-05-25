@@ -1,8 +1,8 @@
 param(
-    [string]$Server = "root@43.108.37.203",
-    [string]$LocalBackupDir = "E:\CHATBOT-QQ\backup\server-daily",
-    [string]$OutputDir = "E:\CHATBOT-QQ\backup\health-reports",
-    [string]$AlertDir = "E:\CHATBOT-QQ\backup\health-alerts",
+    [string]$Server = "root@example.com",
+    [string]$LocalBackupDir = "C:\chatbot-qq\backup\server-daily",
+    [string]$OutputDir = "C:\chatbot-qq\backup\health-reports",
+    [string]$AlertDir = "C:\chatbot-qq\backup\health-alerts",
     [int]$BackupMaxAgeHours = 30,
     [int]$KeepDays = 14,
     [switch]$InstallScheduledTask,
@@ -223,7 +223,7 @@ foreach ($check in $refreshChecks) {
     }
 }
 
-$serviceNames = @("cc-connect", "onebot-group-proxy", "cc-connect-qq", "chatbot-qq-integrity-check.timer", "chatbot-qq-cleanup.timer")
+$serviceNames = @("cc-connect", "onebot-group-proxy", "cc-connect-qq", "chatbot-qq-integrity-check.timer", "chatbot-qq-cleanup.timer", "cc-connect-qq-provider-failover.timer")
 foreach ($name in $serviceNames) {
     $state = (Invoke-RemoteText "systemctl is-active $name 2>/dev/null || true").Trim()
     if (-not $state) {

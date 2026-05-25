@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { appendJSONObject, readJSONLShardLines } = require("./jsonl-shards");
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -33,7 +34,7 @@ function addFileIndex({ workspace, scope = "group", scopeID = "", userID = "", m
     tags: [...new Set([...(Array.isArray(tags) ? tags : []), path.extname(String(name || relativePath)).toLowerCase(), parser].map(String).filter(Boolean))]
   };
   ensureDir(path.dirname(indexFile(workspace)));
-  fs.appendFileSync(indexFile(workspace), `${JSON.stringify(item)}\n`, "utf8");
+  appendJSONObject(indexFile(workspace), item);
   return item;
 }
 
@@ -111,9 +112,7 @@ function readFileIndexWithBadCount(workspace) {
     return { items: [], bad_lines: 0 };
   }
   const out = { items: [], bad_lines: 0 };
-  for (const line of fs.readFileSync(file, "utf8")
-    .split(/\r?\n/)
-    .filter(Boolean)) {
+  for (const { line } of readJSONLShardLines(file)) {
     try {
       out.items.push(JSON.parse(line));
     } catch {

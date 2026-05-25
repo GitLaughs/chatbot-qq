@@ -2,8 +2,8 @@
 
 ## 已确认现状
 
-- 本地项目目录：`E:\CHATBOT-QQ`。
-- GitHub 发布目录：`E:\CHATBOT-QQ-publish`。
+- 本地项目目录：`C:\chatbot-qq`。
+- GitHub 发布目录：`C:\chatbot-qq-publish`。
 - 服务器存在 QQ bridge 进程：`cc-connect --config /root/.cc-connect-qq/config.toml`。
 - OneBot proxy 已有 `/healthz`、`/metrics`、选择性监听、画图、文件保存、PDF 解析、成员画像。
 

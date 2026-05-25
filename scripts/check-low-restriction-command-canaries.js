@@ -7,9 +7,9 @@ const path = require("path");
 const { createProxyCommands } = require("./lib/proxy-commands");
 const { addFileIndex } = require("./lib/file-index");
 
-const GROUP_ID = 1107099585;
-const ADMIN_USER = 1602858215;
-const NORMAL_USER = 2138730775;
+const GROUP_ID = 9876500001;
+const ADMIN_USER = 1234500001;
+const NORMAL_USER = 1234500002;
 
 function main() {
   const options = parseArgs(process.argv.slice(2));

@@ -2,9 +2,14 @@
 set -euo pipefail
 
 workspace="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$workspace/../.." && pwd)"
 prompt_path="$workspace/scripts/dream_prompt.md"
 dream_dir="$workspace/memory/dreams"
 stamp="$(date +%Y%m%d-%H%M%S)"
+evidence_rel="memory/dreams/$stamp-evidence.md"
+evidence_path="$workspace/$evidence_rel"
+source_map_rel="memory/dreams/$stamp-source-map.jsonl"
+source_map_path="$workspace/$source_map_rel"
 last_message_path="$dream_dir/$stamp-last-message.md"
 log_path="$dream_dir/$stamp-events.jsonl"
 
@@ -18,9 +23,24 @@ if [[ ! -f "$prompt_path" ]]; then
 fi
 
 mkdir -p "$dream_dir"
+node "$root/scripts/build-dream-packet.js" \
+  --workspace "$workspace" \
+  --output "$evidence_path" \
+  --source-map-output "$source_map_path" >/dev/null
 
 set +e
-codex exec \
+{
+  cat "$prompt_path"
+  cat <<PROMPT
+
+Run context:
+
+- Evidence packet: $evidence_rel
+- Source map for manual debugging only: $source_map_rel
+
+Use the evidence packet as the only raw chat evidence for this dream pass.
+PROMPT
+} | codex exec \
   --ephemeral \
   --disable memories \
   -C "$workspace" \
@@ -29,7 +49,7 @@ codex exec \
   -m gpt-5.5 \
   -c 'model_reasoning_effort="xhigh"' \
   -o "$last_message_path" \
-  - <"$prompt_path" >"$log_path" 2>&1
+  - >"$log_path" 2>&1
 exit_code=$?
 set -e
 

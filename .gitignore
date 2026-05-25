@@ -1,29 +1,61 @@
+# === Secrets & local config ===
 .env
+.env.*
 *.local.toml
 *.local.toml.lock
+*.local.json
+configs/cc-connect.napcat.local.toml
+configs/cc-connect.qqbot.local.toml
+NapCat.json
+configs/NapCat.json
+onebot11_*.json
+configs/onebot11_*.json
+
+# === Claude Code local settings ===
+.claude/
+
+# === Node.js ===
+node_modules/
+package-lock.json
+
+# === Build artifacts ===
 bin/
 dist/
+
+# === Logs & runtime data ===
 *.log
+*.sqlite
+*.sqlite3
+*.db
 .cc-connect/
-backup/
+runs/
+runs/*.jsonl
+memory/
 tmp/
-tools/
+backup/
+
+# === Backup & temp files ===
+*.bak
+*.bak-*
+*.tmp
+*.cache
+*.lock
+
+# === Python ===
 __pycache__/
 *.pyc
+
+# === User & group runtime data ===
 users/
 groups/*/members/
 groups/*/memory/
 groups/*/local_files/
 groups/*/files/
+groups/*/GROUP_PROFILE.md
+groups/*/PROFILE.md
+groups/*/INSTRUCTIONS.md
+groups/*/KNOWLEDGE.md
 chatbot-qq-qrcode.png
-configs/cc-connect.napcat.local.toml
-NapCat.json
-configs/NapCat.json
-onebot11_*.json
-configs/onebot11_*.json
-*.sqlite
-*.sqlite3
-*.db
-memory/search/*.sqlite3
-memory/search/*.sqlite3-*
-runs/*.jsonl
+
+# === Platform-specific ===
+tools/

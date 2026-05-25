@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
 const { addFileIndex } = require("./file-index");
+const { resolveReadableFilePath } = require("./napcat-paths");
 
 function createProxyFiles(deps) {
   const stats = {
@@ -87,8 +88,9 @@ function createProxyFiles(deps) {
     const target = uniquePath(path.join(dir, name));
     const source = data.source || data.path || data.file || data.url;
     try {
-      if (source && typeof source === "string" && fs.existsSync(source)) {
-        fs.copyFileSync(source, target);
+      const localSource = resolveReadableFilePath(source);
+      if (localSource) {
+        fs.copyFileSync(localSource, target);
       } else if (source && /^file:\/\//i.test(source)) {
         fs.copyFileSync(new URL(source), target);
       } else if (source && /^https?:\/\//i.test(source)) {

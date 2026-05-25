@@ -137,7 +137,7 @@ type = "codex"
 [projects.agent.options]
 work_dir = "$groupWorkspaceToml"
 mode = "full-auto"
-model = "gpt-5.5"
+model = "gpt-5.4"
 reasoning_effort = "high"
 
 [[projects.platforms]]
@@ -166,7 +166,7 @@ type = "codex"
 [projects.agent.options]
 work_dir = "$privateWorkspaceToml"
 mode = "full-auto"
-model = "gpt-5.5"
+model = "gpt-5.4"
 reasoning_effort = "high"
 
 [[projects.platforms]]

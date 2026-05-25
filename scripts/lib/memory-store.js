@@ -3,6 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { classifyMemory, memoryFingerprint, normalizeMemoryText, tagMemory } = require("./memory-rules");
 const { looksSensitive: sharedLooksSensitive, redactSecrets } = require("./sensitive-redaction");
+const { appendJSONObject, readJSONLShards } = require("./jsonl-shards");
 
 const VALID_KINDS = new Set(["fact", "preference", "todo", "project", "joke", "boundary", "note"]);
 
@@ -59,7 +60,7 @@ function addMemory({ workspace, scope, scopeID = "", subject, text, kind = "note
     deleted: false
   };
   ensureDir(path.dirname(memoryFile(workspace)));
-  fs.appendFileSync(memoryFile(workspace), `${JSON.stringify(item)}\n`, "utf8");
+  appendJSONObject(memoryFile(workspace), item);
   return item;
 }
 
@@ -97,7 +98,7 @@ function softDeleteMemories({ workspace, query, subject = "", scope = "" }) {
   ensureDir(path.dirname(deleteFile(workspace)));
   const now = new Date().toISOString();
   for (const item of matches) {
-    fs.appendFileSync(deleteFile(workspace), `${JSON.stringify({
+    appendJSONObject(deleteFile(workspace), {
       version: 1,
       time: now,
       deleted_at: now,
@@ -107,7 +108,7 @@ function softDeleteMemories({ workspace, query, subject = "", scope = "" }) {
       query: String(query || ""),
       subject: String(subject || ""),
       scope: String(scope || "")
-    })}\n`, "utf8");
+    });
   }
   return matches.length;
 }
@@ -712,20 +713,7 @@ function inferKind(text) {
 }
 
 function readJSONLines(file) {
-  if (!fs.existsSync(file)) {
-    return [];
-  }
-  return fs.readFileSync(file, "utf8")
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
+  return readJSONLShards(file);
 }
 
 function deletedIDs(workspace) {
@@ -836,13 +824,13 @@ function pendingCandidateApplyBlockers(item) {
 function savePendingSnapshot({ workspace, report }) {
   if (!workspace || !report || !report.snapshot) return;
   ensureDir(path.dirname(pendingSnapshotFile(workspace)));
-  fs.appendFileSync(pendingSnapshotFile(workspace), `${JSON.stringify({
+  appendJSONObject(pendingSnapshotFile(workspace), {
     version: 1,
     snapshot: report.snapshot,
     time: report.time,
     active: report.active,
     entries: report.entries || []
-  })}\n`, "utf8");
+  });
 }
 
 function findPendingSnapshot({ workspace, snapshot }) {

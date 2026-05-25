@@ -12,9 +12,9 @@ const { appendRecentError } = require("./lib/recent-errors");
 const { addTodo } = require("./lib/todo-store");
 const { maskSensitive } = require("./lib/sensitive-redaction");
 
-const GROUP_ID = 1107099585;
-const ADMIN_USER = 1602858215;
-const NORMAL_USER = 2138730775;
+const GROUP_ID = 9876500001;
+const ADMIN_USER = 1234500001;
+const NORMAL_USER = 1234500002;
 const RAW_SECRET = "server-secret-value";
 const PROVIDER_SECRET = "provider-secret-value";
 const OPENAI_SECRET = "openai-secret-value";
@@ -70,7 +70,7 @@ function runCanaries(root) {
       /子 agent 审查包/,
       /NapCat\/OneBot \+ onebot-group-proxy \+ cc-connect/,
       /低成本确定性优先/,
-      /范围：group:1107099585/,
+      /范围：group:9876500001/,
       /记忆：active 1/,
       /候选记忆：active 2/,
       /待办：open 1/,
@@ -91,7 +91,7 @@ function runCanaries(root) {
       new RegExp(PROVIDER_SECRET),
       new RegExp(OPENAI_SECRET),
       /root-only-memory/,
-      /users\\?\/1602858215/,
+      /users\\?\/1234500001/,
       /项目根目录/
     ],
     maxLength: 2000
@@ -125,7 +125,7 @@ function runCanaries(root) {
     msg: privateMsg(ADMIN_USER, "/审查包"),
     mustMatch: [
       /子 agent 审查包/,
-      /范围：private:1602858215/,
+      /范围：private:1234500001/,
       /记忆：active 1/,
       /候选记忆：active 2/,
       /提案：open 2/,
@@ -147,8 +147,8 @@ function runCanaries(root) {
     replies,
     name: "normal-private-review-packet",
     msg: privateMsg(NORMAL_USER, "/审查包"),
-    mustMatch: [/范围：private:2138730775/, /记忆：active 1/, /文件索引：total 1/, /来源提示/, /待办：normal-private 下一轮补一个不跑模型的 canary/],
-    mustNotMatch: [/1602858215/, /root-only-memory/, new RegExp(RAW_SECRET), new RegExp(PROVIDER_SECRET), new RegExp(OPENAI_SECRET)],
+    mustMatch: [/范围：private:1234500002/, /记忆：active 1/, /文件索引：total 1/, /来源提示/, /待办：normal-private 下一轮补一个不跑模型的 canary/],
+    mustNotMatch: [/1234500001/, /root-only-memory/, new RegExp(RAW_SECRET), new RegExp(PROVIDER_SECRET), new RegExp(OPENAI_SECRET)],
     maxLength: 2000
   }));
 

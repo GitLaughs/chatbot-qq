@@ -47,7 +47,7 @@ If you set an access token in NapCat, put the same value in `configs\cc-connect.
 ## 3. Start cc-connect
 
 ```powershell
-cd E:\CHATBOT-QQ
+cd C:\chatbot-qq
 Copy-Item configs\cc-connect.napcat.example.toml configs\cc-connect.napcat.local.toml
 .\scripts\start-cc-connect-napcat.ps1
 ```
@@ -60,6 +60,6 @@ Health check:
 
 ## 4. Security
 
-- Current cc-connect config is limited to QQ group `1107099585`.
+- Current cc-connect config is limited to QQ group `9876500001`.
 - Do not commit QQ numbers, group IDs, cookies, tokens, or NapCat local config.
 - Keep this route separate from the official QQ Bot fallback.

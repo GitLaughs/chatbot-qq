@@ -2,7 +2,7 @@
 # Copy to configs/cc-connect.qqbot.local.toml and fill local secrets there.
 
 language = "zh"
-data_dir = "E:\\CHATBOT-QQ\\.cc-connect"
+data_dir = "C:\\chatbot-qq\\.cc-connect"
 
 [log]
 level = "info"
@@ -27,7 +27,7 @@ reset_on_idle_mins = 30
 type = "codex"
 
 [projects.agent.options]
-work_dir = "E:\\CHATBOT-QQ\\groups\\default"
+work_dir = "C:\\chatbot-qq\\groups\\default"
 mode = "full-auto"
 model = "gpt-5.4-mini"
 reasoning_effort = "medium"

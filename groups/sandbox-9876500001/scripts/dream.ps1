@@ -1,9 +1,14 @@
 $ErrorActionPreference = "Stop"
 
 $workspace = Split-Path -Parent $PSScriptRoot
+$root = (Resolve-Path -LiteralPath (Join-Path $workspace "..\..")).Path
 $promptPath = Join-Path $PSScriptRoot "dream_prompt.md"
 $dreamDir = Join-Path $workspace "memory\dreams"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$evidenceRel = "memory/dreams/$stamp-evidence.md"
+$evidencePath = Join-Path $workspace $evidenceRel
+$sourceMapRel = "memory/dreams/$stamp-source-map.jsonl"
+$sourceMapPath = Join-Path $workspace $sourceMapRel
 $lastMessagePath = Join-Path $dreamDir "$stamp-last-message.md"
 $logPath = Join-Path $dreamDir "$stamp-events.jsonl"
 
@@ -17,7 +22,20 @@ if (!(Test-Path -LiteralPath $dreamDir -PathType Container)) {
     New-Item -ItemType Directory -Path $dreamDir | Out-Null
 }
 
-$prompt = Get-Content -Raw -LiteralPath $promptPath
+& node (Join-Path $root "scripts\build-dream-packet.js") --workspace $workspace --output $evidencePath --source-map-output $sourceMapPath | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "dream evidence packet generation failed"
+}
+
+$prompt = (Get-Content -Raw -LiteralPath $promptPath) + @"
+
+Run context:
+
+- Evidence packet: $evidenceRel
+- Source map for manual debugging only: $sourceMapRel
+
+Use the evidence packet as the only raw chat evidence for this dream pass.
+"@
 
 $args = @(
     "exec",

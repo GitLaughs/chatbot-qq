@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { appendJSONL } = require("./lib/jsonl-shards");
 
 function argValue(name) {
   const index = process.argv.indexOf(name);
@@ -36,6 +37,10 @@ function timestampSlug() {
 
 function appendLine(file, line) {
   ensureDir(path.dirname(file));
+  if (path.extname(file).toLowerCase() === ".jsonl") {
+    appendJSONL(file, line);
+    return;
+  }
   fs.appendFileSync(file, `${line}\n`, "utf8");
 }
 

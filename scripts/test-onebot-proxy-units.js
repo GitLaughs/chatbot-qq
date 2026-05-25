@@ -3,15 +3,36 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { createHealthSnapshot, createMetricsText } = require("./lib/proxy-health");
+const { createCapabilitySnapshot } = require("./lib/capabilities");
 const { createProxyCommands } = require("./lib/proxy-commands");
 const { createProxyFiles } = require("./lib/proxy-files");
 const { loadProxyState } = require("./lib/proxy-state");
 const { appendRecentError } = require("./lib/recent-errors");
+const { resolveReadableFilePath } = require("./lib/napcat-paths");
 const { scanPolicyDrift, formatPolicyDrift } = require("./lib/policy-drift");
+const { buildTaskAgentContext } = require("./lib/task-agent-context");
+const { prepareFileModifyTask } = require("./lib/file-task-prep");
+const { prepareScriptCreateTask } = require("./lib/script-task-prep");
+const { runScriptTaskChecks, scriptSafety } = require("./lib/script-task-checker");
+const { createReminderFromSpec, dueReminders, formatReminderCreated, formatReminderSegments, loadReminders, validateReminderSpec } = require("./lib/reminder-scheduler");
+const { addRota, createRotaFromSpec, dueRotas, formatRotaMessageSegments, formatRotas, parseRotaRequest, previewRota, rotaAssignments, validateRotaSpec } = require("./lib/rota-scheduler");
+const { continuePendingRotaTask, pendingRotaFile, startPendingRotaTask } = require("./lib/rota-followup");
+const { createRotaFromText, formatRotaFallbackFailure, tryParseRotaWithFallback } = require("./lib/rota-task-fallback");
+const { executeNaturalTask, extractGeneratedScript, registeredTaskTypes } = require("./lib/task-agent-pipeline");
+const { createTaskRequest, findAwaitingInputTask, listTaskRequests, readTaskReceipt, taskReceiptPath, taskRequestFile, updateTaskRequest, writeTaskReceipt } = require("./lib/task-request-store");
+const { classifyTask } = require("./lib/task-intent-router");
 const { addFileIndex, fileStats, formatFileStats } = require("./lib/file-index");
 const { addMemory, savePendingCandidates, softDeleteMemories } = require("./lib/memory-store");
 const { looksSensitive: sharedLooksSensitive, maskSensitive: sharedMaskSensitive, redactSecrets } = require("./lib/sensitive-redaction");
-const { shouldRenderAsImage, renderForQQ, enrichMessageForAgent, messageText, normalizeVisualSegments, shouldAdminPokeAck, adminPokePayload } = require("./onebot-group-proxy");
+const { trackActivity, detectGap, buildContinuityContext, buildReplyChainContext, replyChainMessageIDs, activitySnapshot, resetConversationState } = require("./lib/conversation-context");
+const { analyzeMessageMood, updatePrivateMood, updateGroupEnergy, formatGroupEnergyContext, readMoodState, readGroupEnergyState } = require("./lib/mood-tracker");
+const { detectFeedbackSignal, recordFeedbackSignal, feedbackStats, readSignals, formatFeedbackHistory, keywordOverlap: feedbackKeywordOverlap, isDirectFeedback } = require("./lib/feedback-detector");
+const { buildEvidencePacket } = require("./lib/evidence-packet");
+const { appendJSONObject, listJSONLShards, readJSONLShards } = require("./lib/jsonl-shards");
+const { evaluateGroupEngagement, evaluatePrivateCheckin, formatPrivateCheckinMessage, formatProactivityStatus, setProactivityLevel, proactivitySnapshot, keywordOverlap, workspaceKeywords, isCommandLikeText, isActionableGroupText, hasEngagementIntent, readOpenTodoItems, safeCheckinItem, resetProactiveState } = require("./lib/proactive-engager");
+const { buildTaskParseRequest, normalizeModelResult, parseTaskWithModel, validateTaskSpec } = require("./task-agent");
+const { shouldRenderAsImage, maybeRenderOutgoingAsImage, outgoingRenderTarget, renderForQQ, enrichMessageForAgent, composeEnrichedContext, taskAgentContextForMessage, feedbackContextSignalsForMessage, profileContextsForMessage, groupEnergyContextForMessage, shouldSkipGroupEnergyContext, isExplicitQaRequest, isReplyToKnownBotMessage, messageText, normalizeVisualSegments, shouldDispatchListenMessage, naturalTaskRouteForMessage, parseImageCredentials, shouldAdminPokeAck, adminPokePayload, shouldSilenceOutgoing, shouldUploadMentionedFiles, collectOutgoingFileUploadCandidates, fileOutboxCandidates, outboxMatchesTarget, rememberActiveTriggerMessage, trackOutgoingAPI, handleBotReplyResponse, updateTaskRequestFromBotReply, enqueueTaskArtifactUploads, taskArtifactOutboxRows, recordTaskArtifactUploadResult, extractTaskArtifactPaths, validateTaskArtifactPath, awaitingNaturalTaskContinuation, taskContinueRequestForMessage, parseTaskContinueCommand, isPdfFileData, isRotaIntent, recentBotReplies, WORKSPACE_ROOT } = require("./onebot-group-proxy");
+const { cardMetrics, captionArgForFile, captionArgForText, outputPagePaths, paginateBodyText } = require("./render-qq-card-imagemagick");
 
 function testAtOnlyRequiredPorts() {
   const clients = new Map([[3002, {}], [3003, {}], [3005, {}], [3006, {}]]);
@@ -22,8 +43,8 @@ function testAtOnlyRequiredPorts() {
     upstreamReady: () => true,
     upstreamState: () => 1,
     upstreamUrl: "ws://127.0.0.1:3001",
-    allowedGroups: [1107099585, 171290904],
-    allowedPrivateUsers: [2138730775],
+    allowedGroups: [9876500001, 987650002],
+    allowedPrivateUsers: [1234500002],
     pending: [],
     pendingEchoPorts: new Map(),
     pendingOutbound: new Map(),
@@ -33,10 +54,10 @@ function testAtOnlyRequiredPorts() {
     listenModeByGroup: new Map(),
     quietUntilByGroup: new Map(),
     imageStates: new Map(),
-    atOnlyGroups: [171290904],
-    privateRoutes: new Map([[2138730775, { port: 3006 }]]),
+    atOnlyGroups: [987650002],
+    privateRoutes: new Map([[1234500002, { port: 3006 }]]),
     routeForGroup: (groupID) => {
-      if (Number(groupID) === 171290904) return { listenPort: null, atPort: 3005 };
+      if (Number(groupID) === 987650002) return { listenPort: null, atPort: 3005 };
       return { listenPort: 3002, atPort: 3003 };
     },
     maskID: (value) => String(value)
@@ -71,53 +92,305 @@ function testMetricsTextIncludesOperationalCounters() {
   assert.match(text, /chatbot_qq_capability_ok\{capability="image_generation"\} 0/);
 }
 
+function testImageCredentialsUseOpenTokenPool() {
+  const slots = parseImageCredentials({
+    QQ_OPENTOKEN_POOL_KEYS: "key-a,key-b,key-a,key-c,key-d,key-e",
+    OPENAI_IMAGE_BASE_URLS: "https://otokapi.com/v1"
+  }, 4);
+
+  assert.deepStrictEqual(slots.map((slot) => slot.id), ["image-key-1", "image-key-2", "image-key-3", "image-key-4"]);
+  assert.deepStrictEqual(slots.map((slot) => slot.apiKey), ["key-a", "key-b", "key-c", "key-d"]);
+  assert.deepStrictEqual(slots.map((slot) => slot.baseUrl), [
+    "https://otokapi.com/v1",
+    "https://otokapi.com/v1",
+    "https://otokapi.com/v1",
+    "https://otokapi.com/v1"
+  ]);
+}
+
 function testAdminPokeAckUsesNapCatPokeAction() {
   const groupMsg = {
     post_type: "message",
     message_type: "group",
-    group_id: 1107099585,
-    user_id: 1602858215,
+    group_id: 9876500001,
+    user_id: 1234500001,
     message_id: 2,
     raw_message: "ping"
   };
   const privateMsg = {
     post_type: "message",
     message_type: "private",
-    user_id: 1602858215,
+    user_id: 1234500001,
     message_id: 3,
     raw_message: "ping"
   };
   const normalMsg = { ...groupMsg, user_id: 42, message_id: 4 };
 
-  assert.strictEqual(shouldAdminPokeAck(groupMsg), true);
+  assert.strictEqual(shouldAdminPokeAck(groupMsg), false);
   assert.strictEqual(shouldAdminPokeAck(privateMsg), true);
   assert.strictEqual(shouldAdminPokeAck(normalMsg), false);
 
   const groupPayload = adminPokePayload(groupMsg);
-  assert.strictEqual(groupPayload.action, "send_poke");
-  assert.deepStrictEqual(groupPayload.params, { user_id: "1602858215", group_id: "1107099585" });
-  assert.match(groupPayload.echo, /^__poke_2_/);
+  assert.strictEqual(groupPayload, null);
 
   const privatePayload = adminPokePayload(privateMsg);
   assert.strictEqual(privatePayload.action, "send_poke");
-  assert.deepStrictEqual(privatePayload.params, { user_id: "1602858215" });
+  assert.deepStrictEqual(privatePayload.params, { user_id: "1234500001" });
   assert.match(privatePayload.echo, /^__poke_3_/);
 }
 
 function testLatexDisplayDelimitersRenderAsImageAndCleanText() {
   const text = "\\[\n金融/会计/投行就业\n\\]\n\n那上财优势很大。";
   assert.strictEqual(shouldRenderAsImage(text), true);
+  assert.strictEqual(shouldRenderAsImage("x".repeat(100)), false);
+  assert.strictEqual(shouldRenderAsImage("x".repeat(101)), true);
+  assert.strictEqual(shouldRenderAsImage("```js\nconst a = 1;\nconsole.log(a);\n```"), true);
+  assert.strictEqual(shouldRenderAsImage("第一步：x=1\n第二步：y=x+2\n所以 y=3"), true);
   const cleaned = renderForQQ(text);
   assert.match(cleaned, /金融\/会计\/投行就业/);
   assert.doesNotMatch(cleaned, /\\\[/);
   assert.doesNotMatch(cleaned, /\\\]/);
 }
 
+function testMarkdownFallsBackToPlainQQText() {
+  const text = "# 结论\n\n- **第一点**：看 `README.md`\n- [链接](https://example.com)";
+  const cleaned = renderForQQ(text);
+  assert.match(cleaned, /【结论】/);
+  assert.match(cleaned, /• 第一点：看 README\.md/);
+  assert.match(cleaned, /链接 \(https:\/\/example\.com\)/);
+  assert.doesNotMatch(cleaned, /[#*`]/);
+  assert.match(renderForQQ("保存到 local_files/archive/problem_index.md"), /local_files\/archive\/problem_index\.md/);
+}
+
+function testFormulaAndLongRepliesRenderForGroupAndPrivate() {
+  const groupObj = {
+    action: "send_group_msg",
+    params: { group_id: 9876500001, message: "公式：$E=mc^2$" }
+  };
+  const privateObj = {
+    action: "send_private_msg",
+    params: { user_id: 1234500002, message: "x".repeat(101) }
+  };
+  const sendMsgGroupObj = {
+    action: "send_msg",
+    params: { group_id: 9876500001, message: "y".repeat(101) }
+  };
+  const sendMsgPrivateObj = {
+    action: "send_msg",
+    params: { user_id: 1234500002, message: "公式：\\sqrt{x}" }
+  };
+  const targets = [];
+  const imagePath = path.join(os.tmpdir(), `answer-render-test-${process.pid}.png`);
+  fs.writeFileSync(imagePath, "fake image bytes");
+  const renderImage = (target, text) => {
+    targets.push({ target, text });
+    return imagePath;
+  };
+
+  try {
+    const groupOut = maybeRenderOutgoingAsImage(groupObj, groupObj.params.message, { renderImage });
+    const privateOut = maybeRenderOutgoingAsImage(privateObj, privateObj.params.message, { renderImage });
+    const sendMsgGroupOut = maybeRenderOutgoingAsImage(sendMsgGroupObj, sendMsgGroupObj.params.message, { renderImage });
+    const sendMsgPrivateOut = maybeRenderOutgoingAsImage(sendMsgPrivateObj, sendMsgPrivateObj.params.message, { renderImage });
+
+    assert.deepStrictEqual(targets.map((row) => row.target), [
+      { type: "group", id: 9876500001 },
+      { type: "private", id: 1234500002 },
+      { type: "group", id: 9876500001 },
+      { type: "private", id: 1234500002 }
+    ]);
+    for (const out of [groupOut, privateOut, sendMsgGroupOut, sendMsgPrivateOut]) {
+      const image = out.params.message.find((seg) => seg.type === "image");
+      assert.ok(image);
+      assert.match(image.data.file, /^base64:\/\//);
+      assert.strictEqual(image.data.file, `base64://${Buffer.from("fake image bytes").toString("base64")}`);
+    }
+    assert.match(groupOut.params.message[0].data.text, /渲染成图片/);
+  } finally {
+    fs.rmSync(imagePath, { force: true });
+  }
+}
+
+function testPagedRenderedRepliesSendAllImages() {
+  const obj = {
+    action: "send_group_msg",
+    params: { group_id: 9876500001, message: "x".repeat(101) }
+  };
+  const imageA = path.join(os.tmpdir(), `answer-render-page-a-${process.pid}.png`);
+  const imageB = path.join(os.tmpdir(), `answer-render-page-b-${process.pid}.png`);
+  fs.writeFileSync(imageA, "page a");
+  fs.writeFileSync(imageB, "page b");
+  try {
+    const out = maybeRenderOutgoingAsImage(obj, obj.params.message, {
+      renderImage: () => [imageA, imageB]
+    });
+    const images = out.params.message.filter((seg) => seg.type === "image");
+    assert.strictEqual(images.length, 2);
+    assert.strictEqual(images[0].data.file, `base64://${Buffer.from("page a").toString("base64")}`);
+    assert.strictEqual(images[1].data.file, `base64://${Buffer.from("page b").toString("base64")}`);
+  } finally {
+    fs.rmSync(imageA, { force: true });
+    fs.rmSync(imageB, { force: true });
+  }
+}
+
+function testRenderFailureKeepsOriginalOutgoingText() {
+  const obj = {
+    action: "send_private_msg",
+    params: { user_id: 1234500002, message: "x".repeat(101) }
+  };
+  const out = maybeRenderOutgoingAsImage(obj, obj.params.message, {
+    renderImage: () => null
+  });
+  assert.strictEqual(out, obj);
+  assert.strictEqual(out.params.message, obj.params.message);
+}
+
+function testImagemagickRendererUsesCaptionFilesAndPaginatesBody() {
+  const captionArg = captionArgForFile("/tmp/qq-card-body.txt");
+  assert.strictEqual(captionArg, "caption:@/tmp/qq-card-body.txt");
+  assert.strictEqual(captionArg.includes("结论："), false);
+  assert.strictEqual(captionArgForText("结论：ok"), "caption:结论：ok");
+
+  const metrics = cardMetrics(720);
+  assert.strictEqual(metrics.width, 720);
+  assert.strictEqual(metrics.headerHeight, 0);
+  assert.ok(metrics.maxHeight <= 700);
+  assert.ok(metrics.maxBodyLines >= 8);
+  assert.ok(metrics.maxBodyLines < 18);
+  const longText = Array.from({ length: metrics.maxBodyLines + 5 }, (_, index) => `第 ${index + 1} 行公式 x_${index}=y^2`).join("\n");
+  const pages = paginateBodyText(longText, metrics);
+  assert.strictEqual(pages.length, 2);
+  assert.match(pages[0].join("\n"), /第 1 行公式/);
+  assert.doesNotMatch(pages[0].join("\n"), new RegExp(`第 ${metrics.maxBodyLines + 5} 行公式`));
+  assert.match(pages[1].join("\n"), new RegExp(`第 ${metrics.maxBodyLines + 5} 行公式`));
+  assert.deepStrictEqual(outputPagePaths("/tmp/answer.png", 3).map((item) => item.replace(/\\/g, "/")), ["/tmp/answer.png", "/tmp/answer-2.png", "/tmp/answer-3.png"]);
+}
+
+function testPrivatePdfDetectionOnlyMatchesPdfFiles() {
+  assert.strictEqual(isPdfFileData({ file: "lecture.pdf", file_id: "abc" }), true);
+  assert.strictEqual(isPdfFileData({ name: "LECTURE.PDF" }), true);
+  assert.strictEqual(isPdfFileData({ file: "lecture.docx", file_id: "abc" }), false);
+  assert.strictEqual(isPdfFileData({ file_id: "abc" }), false);
+}
+
+function testOutgoingFileUploadCandidatesRequireModifiedLocalFiles() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "outgoing-file-upload-"));
+  try {
+    const workspace = path.join(temp, "users", "1234500001");
+    const archiveDir = path.join(workspace, "local_files", "archive", "2026-05-24");
+    fs.mkdirSync(archiveDir, { recursive: true });
+    const file = path.join(archiveDir, "browser-snapshot-local.ps1");
+    fs.writeFileSync(file, "Write-Output ok\n", "utf8");
+
+    assert.strictEqual(shouldUploadMentionedFiles(`改好的文件在这里：${file}`), true);
+    assert.strictEqual(shouldUploadMentionedFiles(`文件已归档：${file}`), false);
+
+    const absolute = collectOutgoingFileUploadCandidates(`改好的文件在这里：${file}`, workspace, temp);
+    assert.strictEqual(absolute.length, 1);
+    assert.strictEqual(absolute[0].path, path.resolve(file));
+
+    const relative = collectOutgoingFileUploadCandidates("已修改并保存：local_files/archive/2026-05-24/browser-snapshot-local.ps1", workspace, temp);
+    assert.strictEqual(relative.length, 1);
+    assert.strictEqual(relative[0].path, path.resolve(file));
+
+    const outside = path.join(temp, "secret.txt");
+    fs.writeFileSync(outside, "secret", "utf8");
+    assert.deepStrictEqual(collectOutgoingFileUploadCandidates(`已改好：${outside}`, workspace, temp), []);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testFileOutboxCandidatesMatchCurrentChatOnly() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "file-outbox-"));
+  try {
+    const workspace = path.join(temp, "users", "1234500001");
+    const archiveDir = path.join(workspace, "local_files", "archive");
+    fs.mkdirSync(archiveDir, { recursive: true });
+    const file = path.join(archiveDir, "fixed.txt");
+    fs.writeFileSync(file, "fixed\n", "utf8");
+    const outboxPath = path.join(temp, "job.json");
+    fs.writeFileSync(outboxPath, JSON.stringify({
+      type: "private_file_upload",
+      user_id: "1234500001",
+      path: "local_files/archive/fixed.txt",
+      name: "fixed.txt"
+    }), "utf8");
+
+    assert.strictEqual(outboxMatchesTarget({ type: "private_file_upload", user_id: "1234500001" }, { type: "private", id: 1234500001 }, "private-file-outbox"), true);
+    assert.strictEqual(outboxMatchesTarget({ type: "private_file_upload", user_id: "42" }, { type: "private", id: 1234500001 }, "private-file-outbox"), false);
+
+    const candidates = fileOutboxCandidates(outboxPath, { type: "private", id: 1234500001 }, workspace, temp, "private-file-outbox");
+    assert.strictEqual(candidates.length, 1);
+    assert.strictEqual(candidates[0].path, path.resolve(file));
+    assert.strictEqual(candidates[0].name, "fixed.txt");
+    assert.strictEqual(candidates[0].outboxPath, outboxPath);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testNapCatContainerPathMapsToHostDataDir() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "napcat-path-"));
+  try {
+    const hostRoot = path.join(temp, "NapCat");
+    const hostFile = path.join(hostRoot, "temp", "lecture.pdf");
+    fs.mkdirSync(path.dirname(hostFile), { recursive: true });
+    fs.writeFileSync(hostFile, "pdf");
+    const resolved = resolveReadableFilePath("/app/.config/QQ/NapCat/temp/lecture.pdf", {
+      ONEBOT_NAPCAT_DATA_DIR: hostRoot
+    });
+    assert.strictEqual(resolved, hostFile);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testNormalOutgoingDoesNotRenderImage() {
+  const obj = {
+    action: "send_private_msg",
+    params: { user_id: 1234500002, message: "普通回复\n• 已经是普通排版" }
+  };
+  let called = false;
+  const out = maybeRenderOutgoingAsImage(obj, obj.params.message, {
+    renderImage: () => {
+      called = true;
+      return path.join(os.tmpdir(), "unused.png");
+    }
+  });
+
+  assert.strictEqual(called, false);
+  assert.strictEqual(out, obj);
+}
+
+function testSilentReplySentinelIsSuppressedForGroupAndPrivate() {
+  assert.strictEqual(shouldSilenceOutgoing({
+    action: "send_group_msg",
+    params: { group_id: 9876500001, message: "不需要回复awa" }
+  }), true);
+  assert.strictEqual(shouldSilenceOutgoing({
+    action: "send_private_msg",
+    params: { user_id: 1234500002, message: [{ type: "text", data: { text: " “不需要回复awa” " } }] }
+  }), true);
+  assert.strictEqual(shouldSilenceOutgoing({
+    action: "send_group_msg",
+    params: { group_id: 9876500001, message: "这句不是哨兵：不需要回复awa" }
+  }), false);
+}
+
+function testOutgoingRenderTargetSupportsSendMsgPrivateFallback() {
+  assert.deepStrictEqual(outgoingRenderTarget({
+    action: "send_msg",
+    params: { user_id: 1234500002, message: "hi" }
+  }), { type: "private", id: 1234500002 });
+}
+
 function testProfileContextPreservesImageSegment() {
   const msg = {
     post_type: "message",
     message_type: "group",
-    group_id: 1107099585,
+    group_id: 9876500001,
     user_id: 1,
     message_id: 2,
     raw_message: "[CQ:at,qq=3209859433] 评价一下 [CQ:image,file=abc.jpg,url=http://example/image.jpg]",
@@ -149,7 +422,7 @@ function testQuotedImageIsForwardedWhenUserRepliesToImage() {
   const msg = {
     post_type: "message",
     message_type: "group",
-    group_id: 1107099585,
+    group_id: 9876500001,
     user_id: 1,
     message_id: 3,
     raw_message: "[CQ:reply,id=2] 评价一下这个",
@@ -173,7 +446,7 @@ function testRawCQImageAndStickerAreNormalized() {
   const msg = {
     post_type: "message",
     message_type: "group",
-    group_id: 1107099585,
+    group_id: 9876500001,
     user_id: 1,
     message_id: 4,
     raw_message: "看看这个[CQ:image,file=abc.jpg,url=http://example/raw.png][CQ:mface,url=http://example/sticker.webp,summary=点头]",
@@ -185,6 +458,1336 @@ function testRawCQImageAndStickerAreNormalized() {
   assert.ok(enriched.message.some((seg) => seg.type === "image" && seg.data.file === "http://example/sticker.webp"));
   assert.match(messageText(msg), /看看这个\[图片\]\[表情包:点头\]/);
   assert.doesNotMatch(messageText(msg), /\[CQ:image/);
+}
+
+function testEnrichedContextIsDedupedRedactedAndCapped() {
+  const context = composeEnrichedContext([
+    "【画像】access_token=abc123 " + "x".repeat(100),
+    "【画像】access_token=abc123 " + "x".repeat(100),
+    "【反馈】" + "y".repeat(500)
+  ], { maxTotal: 180, maxPart: 80 });
+
+  assert.match(context, /access_token=\*\*\*/);
+  assert.doesNotMatch(context, /abc123/);
+  assert.strictEqual((context.match(/【画像】/g) || []).length, 1);
+  assert.ok(context.length <= 180);
+  assert.match(context, /截断/);
+
+  const prioritized = composeEnrichedContext([
+    { text: "【画像】" + "p".repeat(300), priority: 10 },
+    { text: "【引用链上下文】必须保留" + "r".repeat(30), priority: 100 },
+    { text: "【主动参与上下文】必须保留" + "a".repeat(30), priority: 100 }
+  ], { maxTotal: 100, maxPart: 80 });
+  assert.match(prioritized, /引用链上下文/);
+  assert.match(prioritized, /主动参与上下文/);
+  assert.doesNotMatch(prioritized, /画像/);
+
+  const collapsed = composeEnrichedContext([
+    { kind: "mood", priority: 80, text: "【用户情绪状态：frustrated】\n旧情绪" },
+    { kind: "mood", priority: 80, text: "【用户情绪状态：urgent】\n新情绪" },
+    { kind: "feedback", priority: 70, text: "【近期反馈】positive:1 negative:0" }
+  ], { maxTotal: 500, maxPart: 200 });
+  assert.match(collapsed, /urgent/);
+  assert.doesNotMatch(collapsed, /frustrated/);
+  assert.match(collapsed, /近期反馈/);
+
+  const titledTruncation = composeEnrichedContext([
+    { kind: "reply-chain", priority: 100, text: "【引用链上下文】\n" + "重要内容".repeat(80) }
+  ], { maxTotal: 90, maxPart: 90 });
+  assert.match(titledTruncation, /^【引用链上下文】\n/);
+  assert.match(titledTruncation, /截断/);
+
+  const proactiveFirst = composeEnrichedContext([
+    { kind: "reply-chain", priority: 100, text: "【引用链上下文】\n" + "引用内容".repeat(80) },
+    { kind: "proactive", priority: 110, text: "【主动参与上下文】触发原因：knowledge_match" }
+  ], { maxTotal: 120, maxPart: 100 });
+  assert.match(proactiveFirst, /主动参与上下文/);
+  assert.match(proactiveFirst, /引用链上下文/);
+  assert.ok(proactiveFirst.indexOf("主动参与上下文") < proactiveFirst.indexOf("引用链上下文"));
+
+  const msg = {
+    post_type: "message",
+    message_type: "group",
+    group_id: 9876500001,
+    user_id: 1,
+    message_id: 40,
+    raw_message: "帮我看一下",
+    message: [{ type: "text", data: { text: "帮我看一下" } }],
+    __proactive_context: `【主动】${"sk-"}abcdefghijklmnopqrstuvwxyz ` + "z".repeat(5000)
+  };
+  const enriched = enrichMessageForAgent(msg);
+  assert.match(enriched.raw_message, /【QQ上下文/);
+  assert.match(enriched.raw_message, /【用户消息】\n帮我看一下/);
+  assert.strictEqual(enriched.raw_message.includes(`${"sk-"}abcdefghijklmnopqrstuvwxyz`), false);
+  assert.ok(enriched.message[0].data.text.length < 4000);
+}
+
+function testProfileContextKeepsMemberProfileAheadOfLongGroupProfile() {
+  const groupID = 900000001;
+  const groupDir = path.join(WORKSPACE_ROOT, `sandbox-${groupID}`);
+  try {
+    fs.mkdirSync(path.join(groupDir, "members"), { recursive: true });
+    fs.writeFileSync(path.join(groupDir, "GROUP_PROFILE.md"), `# Group\n${"- 群资料: ".repeat(200)}群资料很长\n- 群资料: access_token=group-demo`, "utf8");
+    fs.writeFileSync(path.join(groupDir, "members", "1.md"), `- 成员资料: ${"sk-"}member-demo-secret\n- 成员偏好: 喜欢先给结论，${"成员补充".repeat(20)}\n`, "utf8");
+
+    const parts = profileContextsForMessage({ message_type: "group", group_id: groupID, user_id: 1 });
+    assert.strictEqual(parts.length, 2);
+    assert.match(parts[0].text, /当前成员画像/);
+    assert.match(parts[0].text, /喜欢先给结论/);
+    assert.match(parts[0].text, /sk-\*\*\*/);
+    assert.strictEqual(parts[0].text.includes(`${"sk-"}member-demo-secret`), false);
+    assert.match(parts[1].text, /群资料/);
+    assert.ok(parts[0].priority > parts[1].priority);
+
+    const composed = composeEnrichedContext(parts, { maxTotal: 120, maxPart: 80 });
+    assert.match(composed, /喜欢先给结论/);
+    assert.match(composed, /sk-\*\*\*/);
+    assert.strictEqual(composed.includes(`${"sk-"}member-demo-secret`), false);
+
+    const tiny = composeEnrichedContext(parts, { maxTotal: 100, maxPart: 80 });
+    assert.match(tiny, /当前成员画像/);
+    assert.match(tiny, /喜欢先给结论/);
+    assert.doesNotMatch(tiny, /群资料/);
+  } finally {
+    fs.rmSync(groupDir, { recursive: true, force: true });
+  }
+}
+
+function testConversationGapAndReplyChainContext() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "conversation-context-"));
+  try {
+    resetConversationState();
+    const old = new Date(Date.now() - 31 * 60000).toISOString();
+    trackActivity({ scope: "group", scopeID: "100", userID: "1", timestamp: old, gapMinutes: 30 });
+    trackActivity({ scope: "group", scopeID: "100", userID: "1", timestamp: new Date().toISOString(), gapMinutes: 30 });
+    const gap = detectGap({ scope: "group", scopeID: "100", thresholdMinutes: 30 });
+    assert.strictEqual(gap.hasGap, true);
+    assert.ok(gap.gapMinutes >= 30);
+
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:32:00.000Z",
+      message_id: "7",
+      user_id: "1",
+      sender: { nickname: "张三" },
+      text: "帮我看看这个代码"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:00.000Z",
+      message_id: "8",
+      user_id: "1",
+      sender: { nickname: "张三" },
+      text: "access_token=abc123 帮我看看"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:10.000Z",
+      message_id: "8-noise-bot",
+      user_id: "bot",
+      sender: { nickname: "bot" },
+      text: "不需要回复awa",
+      bot: true
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:20.000Z",
+      message_id: "8-render-bot",
+      user_id: "bot",
+      sender: { nickname: "bot" },
+      text: "答案已渲染成图片，便于查看公式和排版：",
+      bot: true
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:30.000Z",
+      message_id: "8-image-only",
+      user_id: "1",
+      sender: { nickname: "张三" },
+      text: "[CQ:image,file=a.jpg,url=http://example/a.jpg]"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:40.000Z",
+      message_id: "8-status-bot",
+      user_id: "bot",
+      sender: { nickname: "bot" },
+      text: "会话连续性：最后活跃 1 分钟前"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:42.000Z",
+      message_id: "8-feedback-bot",
+      user_id: "bot",
+      sender: { nickname: "bot" },
+      text: "最近反馈：\n- [positive] 10:30 谢谢"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:44.000Z",
+      message_id: "8-proactive-bot",
+      user_id: "bot",
+      sender: { nickname: "bot" },
+      text: "主动参与：\n全局开关：启用"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:46.000Z",
+      message_id: "8-command",
+      user_id: "1",
+      sender: { nickname: "张三" },
+      text: "/反馈 最近"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:47.000Z",
+      message_id: "8-admin-command",
+      user_id: "1",
+      sender: { nickname: "张三" },
+      text: "/admin tail 20"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:48.000Z",
+      message_id: "8-fullwidth-command",
+      user_id: "1",
+      sender: { nickname: "张三" },
+      text: "／候选记忆 快照"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:49.000Z",
+      message_id: "8-numeric-bot-status",
+      user_id: "3209859433",
+      sender: { nickname: "bot" },
+      text: "服务状态：active"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:50.000Z",
+      message_id: "8-reply-only",
+      user_id: "1",
+      sender: { nickname: "张三" },
+      text: "[CQ:reply,id=9]"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:33:55.000Z",
+      message_id: "8-link",
+      user_id: "1",
+      sender: { nickname: "张三" },
+      text: "日志在 https://example.com/private/path?access_token=secret#frag user@example.com"
+    }));
+    const continuity = buildContinuityContext({ workspace: temp, gapMinutes: 45, messageLimit: 5, excludeMessageID: "8" });
+    assert.match(continuity, /会话恢复上下文/);
+    assert.match(continuity, /张三/);
+    assert.match(continuity, /帮我看看这个代码/);
+    assert.doesNotMatch(continuity, /access_token/);
+    assert.doesNotMatch(continuity, /abc123/);
+    assert.doesNotMatch(continuity, /不需要回复awa/);
+    assert.doesNotMatch(continuity, /答案已渲染成图片/);
+    assert.doesNotMatch(continuity, /example\/a\.jpg/);
+    assert.doesNotMatch(continuity, /会话连续性/);
+    assert.doesNotMatch(continuity, /最近反馈/);
+    assert.doesNotMatch(continuity, /主动参与/);
+    assert.doesNotMatch(continuity, /\/反馈/);
+    assert.doesNotMatch(continuity, /\/admin/);
+    assert.doesNotMatch(continuity, /候选记忆/);
+    assert.doesNotMatch(continuity, /服务状态/);
+    assert.doesNotMatch(continuity, /example\.com/);
+    assert.doesNotMatch(continuity, /user@example\.com/);
+    assert.match(continuity, /\[链接\]/);
+    assert.match(continuity, /\[邮箱\]/);
+    assert.doesNotMatch(continuity, /\[回复\]/);
+    assert.strictEqual(buildContinuityContext({ workspace: temp, gapMinutes: 45, messageLimit: 1, excludeMessageID: "8-link" }), "");
+
+    for (let i = 0; i < 3; i += 1) {
+      trackActivity({ scope: "group", scopeID: "100", userID: "1", timestamp: new Date(Date.now() + (i + 1) * 60000).toISOString(), gapMinutes: 30 });
+    }
+    assert.strictEqual(detectGap({ scope: "group", scopeID: "100", thresholdMinutes: 30 }).hasGap, false);
+    const snapshot = activitySnapshot({ scope: "group", scopeID: "100", thresholdMinutes: 30 });
+    assert.strictEqual(snapshot.hasGap, false);
+
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:34:00.000Z",
+      message_id: "7",
+      user_id: "2",
+      sender: { nickname: "李四" },
+      text: "新的同 ID 消息",
+      raw_message: "[CQ:reply,id=9]新的同 ID 消息"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:35:00.000Z",
+      message_id: "9",
+      user_id: "3",
+      sender: { nickname: "王五" },
+      text: "上层图片 access_token=secret789 [CQ:image,file=img.jpg,url=http://example/private.png]",
+      raw_message: "上层图片 access_token=secret789 [CQ:image,file=img.jpg,url=http://example/private.png]"
+    }));
+    const reply = buildReplyChainContext({
+      workspace: temp,
+      msg: { message: [{ type: "reply", data: { id: "7" } }] }
+    });
+    const replyIDs = replyChainMessageIDs({
+      workspace: temp,
+      msg: { message: [{ type: "reply", data: { id: "7" } }] }
+    });
+    assert.deepStrictEqual(replyIDs, ["7", "9"]);
+    assert.match(reply, /引用链上下文/);
+    assert.match(reply, /新的同 ID 消息/);
+    assert.match(reply, /上层图片/);
+    assert.match(reply, /\[图片\]/);
+    assert.doesNotMatch(reply, /secret789/);
+    assert.doesNotMatch(reply, /\[CQ:image/);
+
+    const dedupedContinuity = buildContinuityContext({
+      workspace: temp,
+      gapMinutes: 45,
+      messageLimit: 5,
+      excludeMessageIDs: replyIDs
+    });
+    assert.doesNotMatch(dedupedContinuity, /新的同 ID 消息/);
+    assert.doesNotMatch(dedupedContinuity, /上层图片/);
+    assert.match(dedupedContinuity, /access_token=\*\*\* 帮我看看/);
+    const noisyReply = buildReplyChainContext({
+      workspace: temp,
+      msg: { message: [{ type: "reply", data: { id: "8-render-bot" } }] }
+    });
+    assert.strictEqual(noisyReply, "");
+    assert.strictEqual(buildReplyChainContext({
+      workspace: temp,
+      msg: { message: [{ type: "reply", data: { id: "8-status-bot" } }] }
+    }), "");
+    assert.strictEqual(buildReplyChainContext({
+      workspace: temp,
+      msg: { message: [{ type: "reply", data: { id: "8-feedback-bot" } }] }
+    }), "");
+    assert.strictEqual(buildReplyChainContext({
+      workspace: temp,
+      msg: { message: [{ type: "reply", data: { id: "8-command" } }] }
+    }), "");
+    assert.strictEqual(buildReplyChainContext({
+      workspace: temp,
+      msg: { message: [{ type: "reply", data: { id: "8-admin-command" } }] }
+    }), "");
+    const rawOnlyReply = buildReplyChainContext({
+      workspace: temp,
+      msg: { raw_message: "[CQ:reply,id=7]继续" }
+    });
+    const rawOnlyIDs = replyChainMessageIDs({
+      workspace: temp,
+      msg: { raw_message: "[CQ:reply,id=7]继续" }
+    });
+    assert.deepStrictEqual(rawOnlyIDs, ["7", "9"]);
+    assert.match(rawOnlyReply, /新的同 ID 消息/);
+
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:36:00.000Z",
+      message_id: "20",
+      user_id: "4",
+      sender: { nickname: "赵六" },
+      text: "真正的上层问题"
+    }));
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T10:36:10.000Z",
+      message_id: "21",
+      user_id: "bot",
+      sender: { nickname: "bot" },
+      text: "服务状态：active",
+      raw_message: "[CQ:reply,id=20]服务状态：active",
+      bot: true
+    }));
+    const skippedNoiseReply = buildReplyChainContext({
+      workspace: temp,
+      msg: { message: [{ type: "reply", data: { id: "21" } }] }
+    });
+    assert.match(skippedNoiseReply, /真正的上层问题/);
+    assert.doesNotMatch(skippedNoiseReply, /服务状态/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+    resetConversationState();
+  }
+}
+
+function testRecentChatRowsReadsTailAcrossRecentFiles() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "conversation-tail-"));
+  try {
+    const memoryDir = path.join(temp, "memory");
+    for (const date of ["2026-05-22", "2026-05-23", "2026-05-24"]) {
+      for (let i = 0; i < 5; i += 1) {
+        appendLine(path.join(memoryDir, `chat-${date}.jsonl`), JSON.stringify({
+          time: `${date}T10:0${i}:00.000Z`,
+          message_id: `${date}-${i}`,
+          user_id: "1",
+          text: `${date} message ${i}`
+        }));
+      }
+    }
+    const rows = require("./lib/conversation-context").recentChatRows(temp, 4);
+    assert.deepStrictEqual(rows.map((row) => row.message_id), [
+      "2026-05-24-1",
+      "2026-05-24-2",
+      "2026-05-24-3",
+      "2026-05-24-4"
+    ]);
+    appendLine(path.join(memoryDir, "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T09:00:00.000Z",
+      message_id: "out-of-order-old",
+      user_id: "1",
+      text: "old imported row"
+    }));
+    appendLine(path.join(memoryDir, "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: "2026-05-24T11:00:00.000Z",
+      message_id: "out-of-order-new",
+      user_id: "1",
+      text: "new imported row"
+    }));
+    const sortedRows = require("./lib/conversation-context").recentChatRows(temp, 2);
+    assert.deepStrictEqual(sortedRows.map((row) => row.message_id), [
+      "2026-05-24-4",
+      "out-of-order-new"
+    ]);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testMoodTrackerPersistsPrivateMoodAndGroupEnergy() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "mood-tracker-"));
+  try {
+    const frustrated = analyzeMessageMood("不行，错了", []);
+    assert.strictEqual(frustrated.mood, "frustrated");
+    const curious = analyzeMessageMood("我想知道这个算法为什么会这样，它的底层原理是什么，能详细讲讲具体推导过程吗", []);
+    assert.strictEqual(curious.mood, "curious");
+    assert.notStrictEqual(analyzeMessageMood("周末愉快", []).mood, "urgent");
+    assert.notStrictEqual(analyzeMessageMood("快递到了吗", []).mood, "urgent");
+    assert.notStrictEqual(analyzeMessageMood("我马上到", []).mood, "urgent");
+    assert.strictEqual(analyzeMessageMood("请尽快处理", []).mood, "urgent");
+    assert.strictEqual(analyzeMessageMood("马上帮我看一下", []).mood, "urgent");
+    assert.notStrictEqual(analyzeMessageMood("哈哈", []).mood, "excited");
+    assert.notStrictEqual(analyzeMessageMood("哈哈哈", []).mood, "excited");
+    assert.strictEqual(analyzeMessageMood("哈哈哈哈", []).mood, "excited");
+    assert.strictEqual(analyzeMessageMood("不懂", []).mood, "confused");
+    assert.ok(analyzeMessageMood("不懂", []).confidence < analyzeMessageMood("不懂，这是什么意思", []).confidence);
+    const longHistory = [{ text: "这是一段很长的历史内容".repeat(20), time: new Date().toISOString() }];
+    assert.strictEqual(analyzeMessageMood("不行", longHistory).mood, "frustrated");
+    assert.notStrictEqual(analyzeMessageMood("嗯", longHistory).mood, "excited");
+
+    updatePrivateMood({ workspace: temp, userID: "1", text: "不懂，这是什么意思", historyLimit: 10 });
+    assert.strictEqual(readMoodState(temp).mood, "confused");
+
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: new Date().toISOString(),
+      message_id: "self-current",
+      user_id: "1",
+      text: "普通消息"
+    }));
+    updatePrivateMood({ workspace: temp, userID: "1", text: "普通消息", historyLimit: 10, messageID: "self-current" });
+    assert.notStrictEqual(readMoodState(temp).mood, "urgent");
+
+    appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+      time: new Date().toISOString(),
+      message_id: "repeat-previous",
+      user_id: "1",
+      text: "重复一下"
+    }));
+    updatePrivateMood({ workspace: temp, userID: "1", text: "重复一下", historyLimit: 10, messageID: "repeat-current" });
+    assert.strictEqual(readMoodState(temp).mood, "urgent");
+
+    for (let i = 0; i < 8; i += 1) {
+      appendLine(path.join(temp, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+        time: new Date().toISOString(),
+        message_id: String(i + 1),
+        user_id: String((i % 3) + 1),
+        text: `讨论 ${i}`
+      }));
+    }
+    updateGroupEnergy({ workspace: temp, groupID: "100", windowMs: 300000 });
+    assert.strictEqual(readGroupEnergyState(temp).level, "high");
+    assert.match(formatGroupEnergyContext({ level: "high", message_count: 8, participant_count: 3, window_ms: 600000 }), /近 10 分钟/);
+
+    const botOnly = fs.mkdtempSync(path.join(os.tmpdir(), "mood-bot-energy-"));
+    try {
+      for (let i = 0; i < 8; i += 1) {
+        appendLine(path.join(botOnly, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+          time: new Date().toISOString(),
+          message_id: `bot-${i}`,
+          user_id: "bot",
+          bot: true,
+          text: `bot reply ${i}`
+        }));
+      }
+      updateGroupEnergy({ workspace: botOnly, groupID: "100", windowMs: 300000 });
+      assert.strictEqual(readGroupEnergyState(botOnly).level, "low");
+      assert.strictEqual(readGroupEnergyState(botOnly).message_count, 0);
+      appendLine(path.join(botOnly, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+        time: new Date().toISOString(),
+        message_id: "bot-status",
+        user_id: "bot",
+        text: "/status"
+      }));
+      updateGroupEnergy({ workspace: botOnly, groupID: "100", windowMs: 300000 });
+      assert.strictEqual(readGroupEnergyState(botOnly).message_count, 0);
+      appendLine(path.join(botOnly, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+        time: new Date(Date.now() + 60000).toISOString(),
+        message_id: "future-user",
+        user_id: "1",
+        text: "future"
+      }));
+      updateGroupEnergy({ workspace: botOnly, groupID: "100", windowMs: 300000 });
+      assert.strictEqual(readGroupEnergyState(botOnly).message_count, 0);
+    } finally {
+      fs.rmSync(botOnly, { recursive: true, force: true });
+    }
+
+    const commandOnly = fs.mkdtempSync(path.join(os.tmpdir(), "mood-command-energy-"));
+    try {
+      for (let i = 0; i < 8; i += 1) {
+        appendLine(path.join(commandOnly, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+          time: new Date().toISOString(),
+          message_id: `cmd-${i}`,
+          group_id: "100",
+          user_id: String((i % 3) + 1),
+          text: i % 2 ? "/心情 状态" : "/status"
+        }));
+      }
+      appendLine(path.join(commandOnly, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({
+        time: new Date().toISOString(),
+        message_id: "other-group",
+        group_id: "200",
+        user_id: "9",
+        text: "其他群普通消息"
+      }));
+      updateGroupEnergy({ workspace: commandOnly, groupID: "100", windowMs: 300000 });
+      assert.strictEqual(readGroupEnergyState(commandOnly).level, "low");
+      assert.strictEqual(readGroupEnergyState(commandOnly).message_count, 0);
+    } finally {
+      fs.rmSync(commandOnly, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testGroupEnergyContextSkipsExplicitAnswerRequests() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "group-energy-context-"));
+  try {
+    fs.mkdirSync(path.join(temp, "memory"), { recursive: true });
+    fs.writeFileSync(path.join(temp, "memory", "group-energy-state.json"), JSON.stringify({
+      level: "high",
+      message_count: 9,
+      participant_count: 4,
+      window_ms: 300000
+    }), "utf8");
+
+    const ordinary = {
+      post_type: "message",
+      message_type: "group",
+      group_id: "100",
+      user_id: "1",
+      raw_message: "Python 报错有人知道吗",
+      message: [{ type: "text", data: { text: "Python 报错有人知道吗" } }]
+    };
+    assert.match(groupEnergyContextForMessage({ workspace: temp, msg: ordinary }), /群聊能量：high/);
+    assert.strictEqual(shouldSkipGroupEnergyContext(ordinary), false);
+
+    const atQuestion = {
+      ...ordinary,
+      self_id: "3209859433",
+      raw_message: "[CQ:at,qq=3209859433] 详细解释一下这个原理",
+      message: [
+        { type: "at", data: { qq: "3209859433" } },
+        { type: "text", data: { text: " 详细解释一下这个原理" } }
+      ]
+    };
+    assert.strictEqual(shouldSkipGroupEnergyContext(atQuestion), true);
+    assert.strictEqual(isExplicitQaRequest(atQuestion), true);
+    const atContext = groupEnergyContextForMessage({ workspace: temp, msg: atQuestion });
+    assert.match(atContext, /先给结论，再分段解释/);
+    assert.doesNotMatch(atContext, /只接明确问题/);
+
+    const detailed = {
+      ...ordinary,
+      raw_message: "能不能一步步详细解释这个原理",
+      message: [{ type: "text", data: { text: "能不能一步步详细解释这个原理" } }]
+    };
+    assert.strictEqual(shouldSkipGroupEnergyContext(detailed), true);
+    assert.strictEqual(isExplicitQaRequest(detailed), true);
+    assert.match(groupEnergyContextForMessage({ workspace: temp, msg: detailed }), /先给结论，再分段解释/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testFeedbackDetectorRecordsAndDeduplicates() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-detector-"));
+  try {
+    const positive = detectFeedbackSignal({
+      replyMsgID: "10",
+      feedbackMsg: { message_type: "group", group_id: "100", message_id: "11", raw_message: "谢谢，解决了" }
+    });
+    assert.strictEqual(positive.signal_type, "positive");
+    assert.strictEqual(positive.confidence, 0.9);
+    const negative = detectFeedbackSignal({
+      replyMsgID: "12",
+      feedbackMsg: { message_type: "group", group_id: "100", message_id: "13", raw_message: "不对，还是不行" }
+    });
+    assert.strictEqual(negative.signal_type, "negative");
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "12",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "14", raw_message: "没明白了" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "12",
+      feedbackMsg: {
+        message_type: "group",
+        group_id: "100",
+        user_id: "1",
+        message_id: "14-direct",
+        raw_message: "[CQ:reply,id=12]没明白了"
+      }
+    }).signal_type, "negative");
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "12",
+      feedbackMsg: { message_type: "private", user_id: "1", message_id: "14-private", raw_message: "没明白了" }
+    }).confidence, 0.7);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "12",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "15", raw_message: "OK 但是不行" }
+    }).signal_type, "negative");
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "12",
+      feedbackMsg: { message_type: "private", user_id: "1", message_id: "15-missing", raw_message: "我还没收到" }
+    }).signal_type, "negative");
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "16", raw_message: "收到" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "16-thanks", raw_message: "谢谢" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "16-thanks-la", raw_message: "谢谢啦" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "16-share", raw_message: "感谢分享" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "16-done", raw_message: "谢谢，可以了" }
+    }).signal_type, "positive");
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "16-run", raw_message: "跑通了" }
+    }).signal_type, "positive");
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "16-no-good", raw_message: "今天不行" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "16-unused", raw_message: "这个没用过" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "16-notice", raw_message: "我没收到通知" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "16-confused-topic", raw_message: "这题没明白" }
+    }), null);
+    const directPositive = detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: {
+        message_type: "group",
+        group_id: "100",
+        user_id: "1",
+        message_id: "17",
+        raw_message: "收到",
+        message: [{ type: "reply", data: { id: "99" } }, { type: "text", data: { text: "收到" } }]
+      }
+    });
+    assert.strictEqual(directPositive.signal_type, "positive");
+    const atPositive = detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: {
+        message_type: "group",
+        group_id: "100",
+        user_id: "1",
+        self_id: "3209859433",
+        message_id: "17-at",
+        raw_message: "[CQ:at,qq=3209859433] 谢谢",
+        message: [
+          { type: "at", data: { qq: "3209859433" } },
+          { type: "text", data: { text: " 谢谢" } }
+        ]
+      }
+    });
+    assert.strictEqual(atPositive.signal_type, "positive");
+    const rawReplyPositive = detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: {
+        message_type: "group",
+        group_id: "100",
+        user_id: "1",
+        message_id: "18",
+        raw_message: "[CQ:reply,id=99]收到"
+      }
+    });
+    assert.strictEqual(rawReplyPositive.signal_type, "positive");
+    assert.strictEqual(rawReplyPositive.evidence, "收到");
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: {
+        message_type: "group",
+        group_id: "100",
+        user_id: "1",
+        message_id: "18-question",
+        raw_message: "[CQ:reply,id=99]收到了吗"
+      }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "99",
+      feedbackMsg: {
+        message_type: "private",
+        user_id: "1",
+        message_id: "18-private-question",
+        raw_message: "解决了吗？"
+      }
+    }), null);
+    assert.strictEqual(isDirectFeedback({
+      replyMsgID: "99",
+      feedbackMsg: {
+        message_type: "group",
+        message: [{ type: "reply", data: { id: "99" } }]
+      }
+    }), true);
+    assert.strictEqual(isDirectFeedback({
+      replyMsgID: "99",
+      feedbackMsg: {
+        message_type: "group",
+        raw_message: "[CQ:reply,id=99]收到"
+      }
+    }), true);
+    const repeat = detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "14",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "15", raw_message: "Python 报错怎么修复" }
+    });
+    assert.strictEqual(repeat.signal_type, "repeat_question");
+    assert.strictEqual(detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "晚上吃什么" },
+      replyMsgID: "14",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "15-repeat-food", raw_message: "晚上吃什么" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "14",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "2", message_id: "15-other", raw_message: "Python 报错怎么修复" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "14",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "15-noise", raw_message: "哈哈" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "14",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "15-image", raw_message: "[CQ:image,file=a.jpg,url=http://example/a.jpg]" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "14",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "15-command", raw_message: "/status Python 报错怎么修复" }
+    }), null);
+    assert.strictEqual(feedbackKeywordOverlap("Python 报错怎么修复", "https://example.com/python?topic=报错&token=secret"), 0);
+    const shift = detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "16",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "17", raw_message: "晚上吃什么" }
+    });
+    assert.strictEqual(shift, null);
+    const transitionShift = detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "16",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "1", message_id: "17-transition", raw_message: "那能帮我看 Node 报错吗" }
+    });
+    assert.strictEqual(transitionShift.signal_type, "topic_shift");
+    assert.strictEqual(transitionShift.confidence, 0.5);
+    const directShift = detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "16",
+      feedbackMsg: {
+        message_type: "group",
+        group_id: "100",
+        user_id: "1",
+        message_id: "17-direct",
+        raw_message: "[CQ:reply,id=16]能帮我看 Node 报错吗"
+      }
+    });
+    assert.strictEqual(directShift.signal_type, "topic_shift");
+    assert.strictEqual(detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "16",
+      feedbackMsg: {
+        message_type: "group",
+        group_id: "100",
+        user_id: "1",
+        message_id: "17-direct-food",
+        raw_message: "[CQ:reply,id=16]晚上吃什么"
+      }
+    }), null);
+    const privateShift = detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "16",
+      feedbackMsg: { message_type: "private", user_id: "1", message_id: "17-private", raw_message: "能帮我看 Node 报错吗" }
+    });
+    assert.strictEqual(privateShift.signal_type, "topic_shift");
+    assert.strictEqual(detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "16",
+      feedbackMsg: { message_type: "private", user_id: "1", message_id: "17-private-food", raw_message: "晚上吃什么" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      triggerMsg: { user_id: "1", raw_message: "Python 报错怎么修复" },
+      replyMsgID: "16",
+      feedbackMsg: { message_type: "group", group_id: "100", user_id: "2", message_id: "17-other", raw_message: "晚上吃什么" }
+    }), null);
+
+    const secretPositive = detectFeedbackSignal({
+      replyMsgID: "18",
+      feedbackMsg: { message_type: "private", user_id: "1", message_id: "19", raw_message: "access_token=abc123 谢谢" }
+    });
+    assert.doesNotMatch(secretPositive.evidence, /abc123/);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "18",
+      feedbackMsg: { message_type: "private", user_id: "1", message_id: "19-url", raw_message: "https://example.com/thanks" }
+    }), null);
+    assert.strictEqual(detectFeedbackSignal({
+      replyMsgID: "18",
+      feedbackMsg: { message_type: "private", user_id: "1", message_id: "19-secret", raw_message: "access_token=thanks" }
+    }), null);
+
+    assert.ok(recordFeedbackSignal({ workspace: temp, signal: positive }));
+    assert.strictEqual(recordFeedbackSignal({ workspace: temp, signal: positive }), null);
+    const oldPositive = { ...positive, id: "fb_old", time: "2026-01-01T00:00:00.000Z" };
+    for (let i = 0; i < 505; i += 1) {
+      assert.ok(recordFeedbackSignal({
+        workspace: temp,
+        signal: {
+          ...oldPositive,
+          id: `fb_old_${i}`,
+          reply_message_id: `old-reply-${i}`,
+          feedback_message_id: `old-feedback-${i}`,
+          evidence: `谢谢 ${i}`,
+          fingerprint: undefined
+        }
+      }));
+    }
+    assert.strictEqual(recordFeedbackSignal({ workspace: temp, signal: positive }), null);
+    const duplicateNegativeA = detectFeedbackSignal({
+      replyMsgID: "20",
+      feedbackMsg: { message_type: "private", user_id: "1", message_id: "21", raw_message: "不行" }
+    });
+    const duplicateNegativeB = detectFeedbackSignal({
+      replyMsgID: "20",
+      feedbackMsg: { message_type: "private", user_id: "1", message_id: "22", raw_message: "不行" }
+    });
+    assert.ok(recordFeedbackSignal({ workspace: temp, signal: duplicateNegativeA }));
+    assert.strictEqual(recordFeedbackSignal({ workspace: temp, signal: duplicateNegativeB }), null);
+    const otherUserNegative = detectFeedbackSignal({
+      replyMsgID: "20",
+      feedbackMsg: { message_type: "private", user_id: "2", message_id: "23", raw_message: "不行" }
+    });
+    assert.ok(recordFeedbackSignal({ workspace: temp, signal: otherUserNegative }));
+    const stats = feedbackStats({ workspace: temp });
+    assert.strictEqual(stats.total, 508);
+    assert.strictEqual(stats.byType.positive, 506);
+    assert.strictEqual(stats.byType.negative, 2);
+    assert.strictEqual(readSignals({ workspace: temp, limit: 5 }).length, 5);
+    const history = formatFeedbackHistory([
+      {
+        signal_type: "negative",
+        time: "2026-05-24T10:10:00.000Z",
+        direct: false,
+        confidence: 0.6,
+        gap_seconds: 45,
+        reply_message_id: "20",
+        evidence: "还是不行"
+      }
+    ]);
+    assert.match(history, /indirect confidence=0\.60 gap=45s reply=20/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testFeedbackRuntimeCarriesTriggerMessageForImplicitSignals() {
+  recentBotReplies.splice(0, recentBotReplies.length);
+  const trigger = {
+    post_type: "message",
+    message_type: "group",
+    group_id: 9876500001,
+    user_id: 1,
+    message_id: 701,
+    raw_message: "Python 报错怎么修复"
+  };
+  rememberActiveTriggerMessage(3002, trigger);
+  const tracked = trackOutgoingAPI({
+    action: "send_group_msg",
+    params: { group_id: 9876500001, message: "可以这样修" }
+  }, 3002);
+  handleBotReplyResponse({ echo: tracked.echo, status: "ok", retcode: 0, data: { message_id: 702 } });
+  const latest = recentBotReplies.at(-1);
+  assert.strictEqual(latest.triggerMsg.message_id, "701");
+  const repeat = detectFeedbackSignal({
+    triggerMsg: latest.triggerMsg,
+    replyMsgID: latest.messageID,
+    feedbackMsg: {
+      message_type: "group",
+      group_id: 9876500001,
+      user_id: 1,
+      message_id: 703,
+      raw_message: "Python 报错怎么修复"
+    }
+  });
+  assert.strictEqual(repeat.signal_type, "repeat_question");
+}
+
+function testReplyToKnownBotMessageUsesFocusedGroupEnergyContext() {
+  recentBotReplies.splice(0, recentBotReplies.length);
+  const trigger = {
+    post_type: "message",
+    message_type: "group",
+    group_id: 9876500001,
+    user_id: 1,
+    message_id: 901,
+    raw_message: "Python 报错怎么修复"
+  };
+  rememberActiveTriggerMessage(3002, trigger);
+  const tracked = trackOutgoingAPI({
+    action: "send_group_msg",
+    params: { group_id: 9876500001, message: "可以这样修" }
+  }, 3002);
+  handleBotReplyResponse({ echo: tracked.echo, status: "ok", retcode: 0, data: { message_id: 902 } });
+
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "group-energy-reply-"));
+  try {
+    fs.mkdirSync(path.join(temp, "memory"), { recursive: true });
+    fs.writeFileSync(path.join(temp, "memory", "group-energy-state.json"), JSON.stringify({
+      level: "high",
+      message_count: 10,
+      participant_count: 5,
+      window_ms: 300000
+    }), "utf8");
+    const replyMsg = {
+      post_type: "message",
+      message_type: "group",
+      group_id: 9876500001,
+      user_id: 1,
+      raw_message: "[CQ:reply,id=902]具体怎么做？",
+      message: [
+        { type: "reply", data: { id: "902" } },
+        { type: "text", data: { text: "具体怎么做？" } }
+      ]
+    };
+    assert.strictEqual(isReplyToKnownBotMessage(replyMsg), true);
+    assert.strictEqual(isExplicitQaRequest(replyMsg), true);
+    const context = groupEnergyContextForMessage({ workspace: temp, msg: replyMsg });
+    assert.match(context, /优先回答当前明确请求|先给结论/);
+    assert.doesNotMatch(context, /只接明确问题/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testGroupFeedbackContextIsScopedToCurrentUser() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-context-scope-"));
+  try {
+    const userA = detectFeedbackSignal({
+      replyMsgID: "10",
+      feedbackMsg: {
+        message_type: "group",
+        group_id: "100",
+        user_id: "1",
+        message_id: "11",
+        raw_message: "[CQ:reply,id=10]不行"
+      }
+    });
+    const userB = detectFeedbackSignal({
+      replyMsgID: "20",
+      feedbackMsg: {
+        message_type: "group",
+        group_id: "100",
+        user_id: "2",
+        message_id: "21",
+        raw_message: "[CQ:reply,id=20]谢谢"
+      }
+    });
+    assert.ok(recordFeedbackSignal({ workspace: temp, signal: userA }));
+    assert.ok(recordFeedbackSignal({ workspace: temp, signal: userB }));
+    const userBNonDirect = {
+      ...userB,
+      id: "fb_non_direct_b",
+      reply_message_id: "non-direct-20",
+      feedback_message_id: "non-direct-21",
+      signal_type: "negative",
+      evidence: "不行",
+      direct: false,
+      fingerprint: undefined
+    };
+    assert.ok(recordFeedbackSignal({ workspace: temp, signal: userBNonDirect }));
+    for (let i = 0; i < 25; i += 1) {
+      assert.ok(recordFeedbackSignal({
+        workspace: temp,
+        signal: {
+          ...userA,
+          id: `fb_other_${i}`,
+          reply_message_id: `other-reply-${i}`,
+          feedback_message_id: `other-feedback-${i}`,
+          evidence: `不行 ${i}`,
+          direct: true,
+          fingerprint: undefined
+        }
+      }));
+    }
+
+    const forB = feedbackContextSignalsForMessage({
+      workspace: temp,
+      msg: { message_type: "group", group_id: "100", user_id: "2" },
+      limit: 5
+    });
+    assert.deepStrictEqual(forB.map((item) => item.feedback_user_id), ["2"]);
+    assert.deepStrictEqual(forB.map((item) => item.signal_type), ["positive"]);
+    assert.deepStrictEqual(forB.map((item) => item.direct), [true]);
+
+    const privateTemp = fs.mkdtempSync(path.join(os.tmpdir(), "feedback-private-scope-"));
+    try {
+      const privateNegative = detectFeedbackSignal({
+        replyMsgID: "30",
+        feedbackMsg: { message_type: "private", user_id: "2", message_id: "31", raw_message: "不行" }
+      });
+      const privatePositive = detectFeedbackSignal({
+        replyMsgID: "32",
+        feedbackMsg: { message_type: "private", user_id: "2", message_id: "33", raw_message: "谢谢" }
+      });
+      assert.ok(recordFeedbackSignal({ workspace: privateTemp, signal: privateNegative }));
+      assert.ok(recordFeedbackSignal({ workspace: privateTemp, signal: privatePositive }));
+      const forPrivate = feedbackContextSignalsForMessage({
+        workspace: privateTemp,
+        msg: { message_type: "private", user_id: "2" },
+        limit: 5
+      });
+      assert.deepStrictEqual(forPrivate.map((item) => item.signal_type), ["negative", "positive"]);
+    } finally {
+      fs.rmSync(privateTemp, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testProactiveEngagerKnowledgeMatchAndCooldown() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proactive-engager-"));
+  try {
+    resetProactiveState();
+    fs.writeFileSync(path.join(temp, "KNOWLEDGE.md"), "Python 报错 作业 调试\n", "utf8");
+    const first = evaluateGroupEngagement({
+      workspace: temp,
+      groupID: "100",
+      msg: { raw_message: "Python 作业 报错了怎么办" },
+      level: "normal",
+      cooldownMs: 900000
+    });
+    assert.strictEqual(first.shouldEngage, true);
+    assert.strictEqual(first.reason, "knowledge_match");
+    const second = evaluateGroupEngagement({
+      workspace: temp,
+      groupID: "100",
+      msg: { raw_message: "Python 作业 报错了怎么办" },
+      level: "normal",
+      cooldownMs: 900000
+    });
+    assert.strictEqual(second.shouldEngage, false);
+    assert.strictEqual(second.reason, "cooldown");
+    const off = evaluateGroupEngagement({ workspace: temp, groupID: "101", msg: { raw_message: "Python 作业 报错" }, level: "off" });
+    assert.strictEqual(off.shouldEngage, false);
+    assert.strictEqual(evaluateGroupEngagement({
+      workspace: temp,
+      groupID: "102",
+      msg: { raw_message: "Python 作业 调试" },
+      level: "normal",
+      cooldownMs: 0
+    }).reason, "no_intent");
+    assert.strictEqual(evaluateGroupEngagement({
+      workspace: temp,
+      groupID: "102",
+      msg: { raw_message: "Python 作业 调试？" },
+      level: "normal",
+      cooldownMs: 0
+    }).shouldEngage, true);
+    assert.strictEqual(evaluateGroupEngagement({
+      workspace: temp,
+      groupID: "102",
+      msg: { raw_message: "Python 作业 调试？" },
+      level: "normal",
+      cooldownMs: 0
+    }).shouldEngage, true);
+    assert.strictEqual(evaluateGroupEngagement({
+      workspace: temp,
+      groupID: "110",
+      msg: { raw_message: "Python 作业 报错启动失败" },
+      level: "normal",
+      cooldownMs: 0
+    }).shouldEngage, true);
+    resetProactiveState();
+    assert.strictEqual(evaluateGroupEngagement({
+      workspace: temp,
+      groupID: "102",
+      msg: { raw_message: "Python 作业 调试" },
+      level: "high",
+      cooldownMs: 0
+    }).shouldEngage, true);
+    assert.strictEqual(evaluateGroupEngagement({ workspace: temp, groupID: "106", msg: { raw_message: "谢谢" }, level: "high", cooldownMs: 0 }).reason, "low_information");
+    assert.strictEqual(evaluateGroupEngagement({ workspace: temp, groupID: "107", msg: { raw_message: "[CQ:image,file=a.jpg,url=http://example/a.jpg]" }, level: "high", cooldownMs: 0 }).reason, "low_information");
+    assert.strictEqual(evaluateGroupEngagement({ workspace: temp, groupID: "108", msg: { raw_message: "/status Python 作业 报错怎么办" }, level: "high", cooldownMs: 0 }).reason, "command");
+    assert.strictEqual(evaluateGroupEngagement({ workspace: temp, groupID: "109", msg: { raw_message: "／心情 Python 作业 报错怎么办" }, level: "high", cooldownMs: 0 }).reason, "command");
+    assert.strictEqual(isActionableGroupText("Python 作业 报错了怎么办"), true);
+    assert.strictEqual(isActionableGroupText("谢谢"), false);
+    assert.strictEqual(isActionableGroupText("/status Python 作业 报错怎么办"), false);
+    assert.strictEqual(isCommandLikeText("／心情 状态"), true);
+    assert.strictEqual(hasEngagementIntent({ raw_message: "Python 作业 调试？" }), true);
+    assert.strictEqual(hasEngagementIntent({ raw_message: "Python 作业 调试" }), false);
+    assert.strictEqual(hasEngagementIntent({ raw_message: "NapCat cc-connect 启动失败" }), true);
+    assert.deepStrictEqual(keywordOverlap("rapid 项目", ["api"]), []);
+    assert.deepStrictEqual(keywordOverlap("api 项目", ["api"]), ["api"]);
+    assert.deepStrictEqual(keywordOverlap("看 https://example.com/napcat/cc-connect?api=1", ["napcat", "cc-connect", "api"]), []);
+
+    const noisy = fs.mkdtempSync(path.join(os.tmpdir(), "proactive-noisy-"));
+    try {
+      appendLine(path.join(noisy, "memory", "memories.jsonl"), JSON.stringify({
+        id: "m1",
+        kind: "note",
+        text: `Python 调试 HSPICE ${"sk-"}proactive-secret access_token api_key user@example.com https://example.com/a`
+      }));
+      const keys = workspaceKeywords(noisy);
+      assert.ok(keys.includes("python"));
+      assert.ok(keys.includes("调试"));
+      assert.ok(keys.includes("hspice"));
+      assert.strictEqual(keys.includes("id"), false);
+      assert.strictEqual(keys.includes("text"), false);
+      assert.strictEqual(keys.some((item) => item.includes("secret")), false);
+      assert.strictEqual(keys.includes("access_token"), false);
+      assert.strictEqual(keys.includes("api_key"), false);
+      assert.strictEqual(keys.includes("user@example.com"), false);
+      assert.strictEqual(keys.includes("https://example.com/a"), false);
+      assert.strictEqual(evaluateGroupEngagement({
+        workspace: noisy,
+        groupID: "103",
+        msg: { raw_message: "id text status message" },
+        level: "high",
+        cooldownMs: 0
+      }).shouldEngage, false);
+      fs.writeFileSync(path.join(noisy, "KNOWLEDGE.md"), "项目 功能 问题 代码 测试 NapCat onebot-group-proxy cc-connect\n", "utf8");
+      assert.strictEqual(evaluateGroupEngagement({
+        workspace: noisy,
+        groupID: "104",
+        msg: { raw_message: "这个项目功能有问题？" },
+        level: "high",
+        cooldownMs: 0
+      }).shouldEngage, false);
+      assert.strictEqual(evaluateGroupEngagement({
+        workspace: noisy,
+        groupID: "105",
+        msg: { raw_message: "NapCat onebot-group-proxy cc-connect 怎么接？" },
+        level: "normal",
+        cooldownMs: 0
+      }).shouldEngage, true);
+    } finally {
+      fs.rmSync(noisy, { recursive: true, force: true });
+    }
+
+    const phrase = fs.mkdtempSync(path.join(os.tmpdir(), "proactive-phrase-"));
+    try {
+      fs.writeFileSync(path.join(phrase, "KNOWLEDGE.md"), "主动参与配置\n", "utf8");
+      const keys = workspaceKeywords(phrase);
+      assert.ok(keys.includes("主动参与配置"));
+      assert.ok(keys.includes("主动"));
+      assert.ok(keys.includes("参与"));
+      assert.ok(keys.includes("配置"));
+      assert.strictEqual(evaluateGroupEngagement({
+        workspace: phrase,
+        groupID: "111",
+        msg: { raw_message: "主动参与怎么配置？" },
+        level: "normal",
+        cooldownMs: 0
+      }).shouldEngage, true);
+    } finally {
+      fs.rmSync(phrase, { recursive: true, force: true });
+    }
+
+    const levels = new Map();
+    assert.strictEqual(setProactivityLevel({ groupID: "100", level: "high", levels }), "high");
+    assert.strictEqual(proactivitySnapshot({ groupID: "100", levels }).level, "high");
+    const statusText = formatProactivityStatus({
+      defaultLevel: "normal",
+      overrideLevel: "high",
+      level: "high",
+      cooldownRemainingMs: 61000,
+      lastEngagement: "2026-05-24T09:00:00.000Z"
+    }, {
+      enabled: true,
+      quiet: true,
+      quietRemainingMs: 62000,
+      quietUntil: Date.parse("2026-05-24T09:10:00.000Z"),
+      checkinHours: 4,
+      checkinIntervalMs: 1800000
+    });
+    assert.match(statusText, /全局开关：启用/);
+    assert.match(statusText, /默认级别：normal/);
+    assert.match(statusText, /本群覆盖级别：high/);
+    assert.match(statusText, /本群生效级别：high/);
+    assert.match(statusText, /静默：开启，剩余 62 秒，到期 2026-05-24T09:10:00.000Z/);
+    assert.match(statusText, /冷却剩余：61 秒/);
+    assert.match(statusText, /当前状态：不会插话：静默剩余 62 秒/);
+    assert.match(statusText, /normal=求助\/提问 且 overlap>=3/);
+    assert.match(statusText, /私聊签到：启用，空闲 4 小时/);
+    assert.strictEqual(statusText.includes("987650002"), false);
+    const disabledStatus = formatProactivityStatus({
+      defaultLevel: "off",
+      level: "off",
+      cooldownRemainingMs: 0
+    }, {
+      enabled: false,
+      checkinHours: 4,
+      checkinIntervalMs: 1800000
+    });
+    assert.match(disabledStatus, /全局开关：关闭/);
+    assert.match(disabledStatus, /当前状态：不会插话：全局关闭/);
+    assert.match(disabledStatus, /默认级别：off/);
+    assert.match(disabledStatus, /本群覆盖级别：未设置/);
+    assert.match(disabledStatus, /本群生效级别：off/);
+    assert.match(disabledStatus, /私聊签到：关闭（全局开关关闭）/);
+    const evalStatus = formatProactivityStatus({
+      defaultLevel: "normal",
+      level: "normal",
+      cooldownRemainingMs: 0
+    }, {
+      enabled: true,
+      recentEvaluations: [
+        { outcome: "skip", reason: "no_match", confidence: 0.25, topic: "python", time: new Date().toISOString() },
+        { outcome: "engage", reason: "knowledge_match", confidence: 0.75, topic: "napcat", time: new Date().toISOString() }
+      ]
+    });
+    assert.match(evalStatus, /当前状态：可评估/);
+    assert.match(evalStatus, /最近评估：/);
+    assert.match(evalStatus, /engage knowledge_match confidence=0\.75 topic=napcat/);
+
+    assert.strictEqual(evaluatePrivateCheckin({ workspace: temp, userID: "1", lastActivity: "", hours: 4 }).reason, "missing_activity");
+    assert.strictEqual(evaluatePrivateCheckin({ workspace: temp, userID: "1", lastActivity: "not-a-date", hours: 4 }).reason, "invalid_activity");
+    assert.strictEqual(evaluatePrivateCheckin({
+      workspace: temp,
+      userID: "1",
+      lastActivity: new Date(Date.now() - 3600000).toISOString(),
+      hours: 4
+    }).reason, "recent");
+    appendLine(path.join(temp, "memory", "todos.jsonl"), "{bad json");
+    appendLine(path.join(temp, "memory", "todos.jsonl"), JSON.stringify({ id: "done_1", text: "已经完成", status: "done", userID: "1" }));
+    appendLine(path.join(temp, "memory", "todos.jsonl"), JSON.stringify({ id: "other_1", text: "别人的事项", status: "open", userID: "2" }));
+    assert.strictEqual(readOpenTodoItems({ workspace: temp, userID: "1" }).length, 0);
+    appendLine(path.join(temp, "memory", "todos.jsonl"), JSON.stringify({ id: "todo_1", text: "继续整理资料", status: "open", userID: "1" }));
+    const checkin = evaluatePrivateCheckin({
+      workspace: temp,
+      userID: "1",
+      lastActivity: new Date(Date.now() - 5 * 3600000).toISOString(),
+      hours: 4
+    });
+    assert.strictEqual(checkin.shouldCheckin, true);
+    assert.strictEqual(checkin.openCount, 1);
+    assert.match(checkin.item, /继续整理资料/);
+    assert.match(formatPrivateCheckinMessage(checkin), /继续整理资料/);
+    assert.match(formatPrivateCheckinMessage(checkin), /不急/);
+    assert.match(formatPrivateCheckinMessage({ ...checkin, openCount: 3, item: "整理实验报告" }), /3 个未完成事项/);
+    const secretMessage = formatPrivateCheckinMessage({
+      shouldCheckin: true,
+      openCount: 1,
+      item: `处理 ${"sk-"}checkin-secret 和很长很长很长很长很长很长很长很长很长的事项`
+    });
+    assert.match(secretMessage, /其中一个事项|未完成事项/);
+    assert.strictEqual(secretMessage.includes(`${"sk-"}checkin-secret`), false);
+    assert.ok(secretMessage.length < 120);
+    assert.strictEqual(safeCheckinItem("联系 user@example.com 处理 http://example.com/a"), "联系 处理");
+    assert.strictEqual(safeCheckinItem(`处理 ${"sk-"}checkin-secret`), "");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+    resetProactiveState();
+  }
+}
+
+function testIntelligenceCommandsUseInjectedStatusProviders() {
+  const replies = [];
+  const deps = baseCommandDeps({
+    replies,
+    continuityStatus: () => "连续 ok",
+    moodStatus: () => "心情 ok",
+    feedbackStatus: (_msg, body) => `反馈 ${body || "stats"}`,
+    proactiveStatus: () => formatProactivityStatus({
+      defaultLevel: "normal",
+      level: "normal",
+      cooldownRemainingMs: 0
+    }, { enabled: true, checkinHours: 4, checkinIntervalMs: 1800000 }),
+    setProactivityLevelForGroup: (_groupID, level) => level
+  });
+  const commands = createProxyCommands(deps);
+  const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2 };
+  commands.handleProxyCommand({ ...msg, raw_message: "/连续" });
+  commands.handleProxyCommand({ ...msg, raw_message: "/心情" });
+  commands.handleProxyCommand({ ...msg, raw_message: "/反馈 最近" });
+  commands.handleProxyCommand({ ...msg, raw_message: "/主动 状态" });
+  commands.handleProxyCommand({ ...msg, raw_message: "/主动 high" });
+  assert.strictEqual(replies[0], "连续 ok");
+  assert.strictEqual(replies[1], "心情 ok");
+  assert.strictEqual(replies[2], "反馈 最近");
+  assert.match(replies[3], /全局开关：启用/);
+  assert.match(replies[3], /默认级别：normal/);
+  assert.match(replies[3], /本群生效级别：normal/);
+  assert.match(replies[3], /触发门槛：off=关闭/);
+  assert.match(replies[3], /私聊签到：启用/);
+  assert.strictEqual(replies[4], "已设置本群主动参与级别：high");
+}
+
+function testIntelligenceStatusCommandsExposeRuntimeDiagnostics() {
+  const replies = [];
+  const deps = baseCommandDeps({
+    replies,
+    continuityStatus: () => [
+      "会话连续性：",
+      "开关：启用",
+      "阈值：30 分钟",
+      "恢复消息数：10"
+    ].join("\n"),
+    moodStatus: () => [
+      "群聊能量：",
+      "开关：启用",
+      "窗口：5 分钟"
+    ].join("\n"),
+    feedbackStatus: () => [
+      "反馈检测：",
+      "开关：启用",
+      "窗口：300 秒",
+      "待观察 bot 回复：1",
+      "最近回复：12 秒前 msg 42",
+      "反馈统计："
+    ].join("\n"),
+    proactiveStatus: () => formatProactivityStatus({
+      defaultLevel: "normal",
+      level: "normal",
+      cooldownRemainingMs: 0
+    }, {
+      enabled: true,
+      checkinHours: 4,
+      checkinIntervalMs: 1800000
+    })
+  });
+  const commands = createProxyCommands(deps);
+  const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2 };
+  commands.handleProxyCommand({ ...msg, raw_message: "/连续" });
+  commands.handleProxyCommand({ ...msg, raw_message: "/心情" });
+  commands.handleProxyCommand({ ...msg, raw_message: "/反馈" });
+  assert.match(replies[0], /开关：启用/);
+  assert.match(replies[0], /恢复消息数：10/);
+  assert.match(replies[1], /窗口：5 分钟/);
+  assert.match(replies[2], /待观察 bot 回复：1/);
+  assert.match(replies[2], /最近回复：12 秒前 msg 42/);
 }
 
 function testInvalidProxyStateIsQuarantinedAndReset() {
@@ -222,14 +1825,14 @@ function testAtOnlyModeCommandCannotEnableAll() {
     sendPrivateText: (_userID, _messageID, text) => replies.push(text),
     sendGroupText: (_groupID, _messageID, text) => replies.push(text),
     healthSnapshot: () => ({ ok: true, upstream: { ready: true }, pending: { upstream_queue: 0, outbound: 0 } }),
-    imageStateKey: () => "group:171290904",
+    imageStateKey: () => "group:987650002",
     imageStates: new Map(),
     effectiveListenMode: () => "mention",
     defaultListenMode: "selective",
-    atOnlyGroups: [171290904],
+    atOnlyGroups: [987650002],
     isGroupQuiet: () => false,
     adminUsers: [],
-    allowedGroups: [171290904],
+    allowedGroups: [987650002],
     allowedPrivateUsers: [],
     workspaceForGroup: () => process.cwd(),
     workspaceForPrivateUser: () => process.cwd(),
@@ -250,12 +1853,12 @@ function testAtOnlyModeCommandCannotEnableAll() {
     maskSensitive: (value) => value
   };
   const commands = createProxyCommands(deps);
-  const msg = { message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/模式 all" };
+  const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/模式 all" };
 
   assert.strictEqual(commands.isProxyCommand(msg), true);
   commands.handleProxyCommand(msg);
   assert.strictEqual(replies[0], "这个群已锁定为 @ 触发，只能设为 mention 或 off。");
-  assert.strictEqual(deps.listenModeByGroup.has(171290904), false);
+  assert.strictEqual(deps.listenModeByGroup.has(987650002), false);
 }
 
 function testProfileCommandShowsGroupAndMemberFacts() {
@@ -270,14 +1873,14 @@ function testProfileCommandShowsGroupAndMemberFacts() {
       sendPrivateText: (_userID, _messageID, text) => replies.push(text),
       sendGroupText: (_groupID, _messageID, text) => replies.push(text),
       healthSnapshot: () => ({ ok: true, upstream: { ready: true }, pending: { upstream_queue: 0, outbound: 0 } }),
-      imageStateKey: () => "group:171290904",
+      imageStateKey: () => "group:987650002",
       imageStates: new Map(),
       effectiveListenMode: () => "mention",
       defaultListenMode: "selective",
-      atOnlyGroups: [171290904],
+      atOnlyGroups: [987650002],
       isGroupQuiet: () => false,
       adminUsers: [],
-      allowedGroups: [171290904],
+      allowedGroups: [987650002],
       allowedPrivateUsers: [],
       workspaceForGroup: () => temp,
       workspaceForPrivateUser: () => temp,
@@ -298,7 +1901,7 @@ function testProfileCommandShowsGroupAndMemberFacts() {
       maskSensitive: (value) => value
     };
     const commands = createProxyCommands(deps);
-    const msg = { message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/画像" };
+    const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/画像" };
 
     assert.strictEqual(commands.isProxyCommand(msg), true);
     commands.handleProxyCommand(msg);
@@ -320,59 +1923,99 @@ function testStatusShowsCapabilities() {
         onebot_upstream: { ok: true },
         dream: { ok: true },
         image_generation: { ok: false },
+        task_agent: { ok: true },
+        task_model_parser: { ok: false },
         rendering: { ok: true },
         pdf_parse: { ok: true }
       }
     })
   });
   const commands = createProxyCommands(deps);
-  commands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/status" });
+  commands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/status" });
   assert.match(replies[0], /能力快照/);
   assert.match(replies[0], /dream:可用/);
   assert.match(replies[0], /画图:不可用/);
+  assert.match(replies[0], /自然任务:可用/);
+  assert.match(replies[0], /模型解析:不可用/);
+}
+
+function testCapabilitySnapshotReportsTaskAgentSurface() {
+  const previous = process.env.QQ_TASK_MODEL_PARSER_COMMAND;
+  try {
+    process.env.QQ_TASK_MODEL_PARSER_COMMAND = JSON.stringify([process.execPath, "-e", "process.exit(0)"]);
+    const snapshot = createCapabilitySnapshot({
+      upstreamReady: () => true,
+      clients: new Map([[3002, {}]]),
+      projectRoot: process.cwd(),
+      workspaceRoot: process.cwd(),
+      workspaceForGroup: () => process.cwd(),
+      allowedGroups: [987650002],
+      defaultListenMode: "selective",
+      dreamEnabled: false,
+      imageEnabled: false,
+      imageScript: "",
+      renderScript: "",
+      renderImageMagickScript: "",
+      taskTimezone: "Asia/Shanghai",
+    });
+    assert.strictEqual(snapshot.checks.task_agent.ok, true);
+    assert.strictEqual(snapshot.checks.task_model_parser.ok, true);
+    assert.match(snapshot.checks.task_agent.detail, /Asia\/Shanghai/);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.QQ_TASK_MODEL_PARSER_COMMAND;
+    } else {
+      process.env.QQ_TASK_MODEL_PARSER_COMMAND = previous;
+    }
+  }
 }
 
 function testHelpIndexFiltersByContextAndKeyword() {
   const groupReplies = [];
   const groupCommands = createProxyCommands(baseCommandDeps({ replies: groupReplies }));
-  groupCommands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/help" });
+  groupCommands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/help" });
   assert.match(groupReplies.at(-1), /可用命令/);
   assert.match(groupReplies.at(-1), /\/dream 或 做梦/);
+  assert.match(groupReplies.at(-1), /\/任务 \[task_id\]/);
+  assert.match(groupReplies.at(-1), /\/画图 prompt/);
   assert.doesNotMatch(groupReplies.at(-1), /\/admin/);
   assert.match(groupReplies.at(-1), /\/help 关键词/);
 
-  groupCommands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 3, raw_message: "/help 待办" });
+  groupCommands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 3, raw_message: "/help 待办" });
   assert.match(groupReplies.at(-1), /命令搜索：待办/);
   assert.match(groupReplies.at(-1), /\/待办/);
   assert.match(groupReplies.at(-1), /\/待办 候选/);
   assert.match(groupReplies.at(-1), /\/待办 应用候选/);
 
-  groupCommands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 4, raw_message: "/help 管理员" });
+  groupCommands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 4, raw_message: "/help 管理员" });
   assert.match(groupReplies.at(-1), /没有找到相关命令/);
   assert.doesNotMatch(groupReplies.at(-1), /\/admin/);
 
-  groupCommands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 5, raw_message: "/help dream" });
+  groupCommands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 5, raw_message: "/help dream" });
   assert.match(groupReplies.at(-1), /\/dream 或 做梦/);
+  assert.match(groupReplies.at(-1), /紧凑证据包/);
 
   const privateReplies = [];
-  const privateCommands = createProxyCommands(baseCommandDeps({ replies: privateReplies, adminRootUsers: [1602858215], adminUsers: [1602858215] }));
-  privateCommands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 6, raw_message: "/help" });
+  const privateCommands = createProxyCommands(baseCommandDeps({ replies: privateReplies, adminRootUsers: [1234500001], adminUsers: [1234500001] }));
+  privateCommands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 6, raw_message: "/help" });
   assert.match(privateReplies.at(-1), /\/admin/);
   assert.doesNotMatch(privateReplies.at(-1), /\/dream 或 做梦/);
 
-  privateCommands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 7, raw_message: "/help 管理员" });
+  privateCommands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 7, raw_message: "/help 管理员" });
   assert.match(privateReplies.at(-1), /\/admin/);
 
-  privateCommands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 8, raw_message: "/help dream" });
+  privateCommands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 8, raw_message: "/help dream" });
   assert.match(privateReplies.at(-1), /没有找到相关命令/);
   assert.doesNotMatch(privateReplies.at(-1), /\/dream/);
 
-  privateCommands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 9, raw_message: "/命令 待办" });
+  privateCommands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 9, raw_message: "/命令 待办" });
   assert.match(privateReplies.at(-1), /命令搜索：待办/);
   assert.match(privateReplies.at(-1), /\/待办/);
 
-  privateCommands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 10, raw_message: "/help 不存在关键词" });
-  assert.strictEqual(privateReplies.at(-1), "没有找到相关命令：不存在关键词");
+  privateCommands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 10, raw_message: "/help 不存在关键词" });
+  assert.match(privateReplies.at(-1), /命令搜索：不存在关键词/);
+  assert.match(privateReplies.at(-1), /没有找到相关命令/);
+  assert.match(privateReplies.at(-1), /只显示当前聊天可用命令/);
 }
 
 function testRememberSearchAndForgetStructuredMemory() {
@@ -387,14 +2030,14 @@ function testRememberSearchAndForgetStructuredMemory() {
       appendLine
     });
     const commands = createProxyCommands(deps);
-    const msg = { message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/记住 默认短答，先给结论" };
+    const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/记住 默认短答，先给结论" };
     commands.handleProxyCommand(msg);
 
     const memories = fs.readFileSync(path.join(temp, "memory", "memories.jsonl"), "utf8").trim().split(/\r?\n/).map(JSON.parse);
     assert.strictEqual(memories.length, 2);
     assert.strictEqual(memories[0].version, 1);
     assert.strictEqual(memories[0].scope, "group");
-    assert.strictEqual(memories[0].scope_id, "171290904");
+    assert.strictEqual(memories[0].scope_id, "987650002");
     assert.strictEqual(memories[1].scope, "member");
     assert.strictEqual(memories[1].subject_id, "1");
     assert.ok(memories[0].fingerprint);
@@ -424,7 +2067,7 @@ function testDuplicateRememberIsDeterministicallySkippedAndStatsWork() {
       appendLine
     });
     const commands = createProxyCommands(deps);
-    const msg = { message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/记住 默认短答，先给结论" };
+    const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/记住 默认短答，先给结论" };
     commands.handleProxyCommand(msg);
     commands.handleProxyCommand(msg);
     const rows = fs.readFileSync(path.join(temp, "memory", "memories.jsonl"), "utf8").trim().split(/\r?\n/);
@@ -558,8 +2201,8 @@ function testMemoryEvidenceShowsSourceAndPendingCandidates() {
     addMemory({
       workspace: temp,
       scope: "group",
-      scopeID: "171290904",
-      subject: "171290904",
+      scopeID: "987650002",
+      subject: "987650002",
       kind: "preference",
       text: "默认短答，先给结论",
       source: "explicit",
@@ -569,13 +2212,13 @@ function testMemoryEvidenceShowsSourceAndPendingCandidates() {
     savePendingCandidates({
       workspace: temp,
       scope: "group",
-      scopeID: "171290904",
+      scopeID: "987650002",
       candidates: [{ user: "Alice", user_id: "1", kind: "todo", tags: ["todo"], text: "明天记得整理 QQ bot 待办", time: "2026-05-24T09:00:00.000Z" }]
     });
     fs.appendFileSync(path.join(temp, "memory", "memories.jsonl"), "{bad json}\n", "utf8");
     const deps = baseCommandDeps({ replies, workspaceForGroup: () => temp });
     const commands = createProxyCommands(deps);
-    commands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/证据 短答" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/证据 短答" });
     assert.match(replies.at(-1), /记忆证据/);
     assert.match(replies.at(-1), /已确认记忆/);
     assert.match(replies.at(-1), /候选记忆（待确认）/);
@@ -584,7 +2227,7 @@ function testMemoryEvidenceShowsSourceAndPendingCandidates() {
     assert.match(replies.at(-1), /tags=style/);
     assert.doesNotMatch(replies.at(-1), /^[A-Za-z]:\\/m);
 
-    commands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 3, raw_message: "/为什么这么说 待办" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 3, raw_message: "/为什么这么说 待办" });
     assert.match(replies.at(-1), /\[candidate\/todo\]/);
     assert.match(replies.at(-1), /source=pending-candidate/);
   } finally {
@@ -595,7 +2238,7 @@ function testMemoryEvidenceShowsSourceAndPendingCandidates() {
 function testMemoryRulesAndPreflightAreDeterministicAndMasked() {
   const replies = [];
   const commands = createProxyCommands(baseCommandDeps({ replies }));
-  const msg = { message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/记忆 规则" };
+  const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/记忆 规则" };
 
   commands.handleProxyCommand(msg);
   assert.match(replies.at(-1), /记忆规则（确定性）/);
@@ -667,7 +2310,7 @@ function testProposalBoxAddListSearchShowAndStatus() {
       maskSensitive: (value) => String(value).replace(/token=\S+/ig, "token=***")
     });
     const commands = createProxyCommands(deps);
-    const msg = { message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/建议箱 add 记录 dream 点子 | 把模型审查建议沉淀成 token=secret-value backlog" };
+    const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/建议箱 add 记录 dream 点子 | 把模型审查建议沉淀成 token=secret-value backlog" };
 
     commands.handleProxyCommand(msg);
     assert.match(replies.at(-1), /已加入建议箱/);
@@ -1199,7 +2842,7 @@ function testTodoCommandAddListDoneAndStats() {
       maskSensitive: (value) => String(value).replace(/token=\S+/ig, "token=***")
     });
     const commands = createProxyCommands(deps);
-    const msg = { message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/待办 add 整理 token=secret-value 日志" };
+    const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/待办 add 整理 token=secret-value 日志" };
     commands.handleProxyCommand(msg);
     assert.match(replies.at(-1), /已添加待办/);
     assert.match(replies.at(-1), /token=\*\*\*/);
@@ -1212,7 +2855,7 @@ function testTodoCommandAddListDoneAndStats() {
     const rows = fs.readFileSync(path.join(temp, "memory", "todos.jsonl"), "utf8").trim().split(/\r?\n/).map(JSON.parse);
     assert.strictEqual(rows[0].type, "add");
     assert.strictEqual(rows[0].scope, "group");
-    assert.strictEqual(rows[0].scope_id, "171290904");
+    assert.strictEqual(rows[0].scope_id, "987650002");
     assert.strictEqual(rows[0].created_by, "1");
 
     commands.handleProxyCommand({ ...msg, raw_message: "/待办 done 1" });
@@ -1343,7 +2986,7 @@ function testTodoSearchKeepsGlobalActiveIndexesAndExplicitAddSemantics() {
       maskSensitive: (value) => String(value).replace(/token=\S+/ig, "token=***")
     });
     const commands = createProxyCommands(deps);
-    const msg = { message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/待办 add 第一项" };
+    const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/待办 add 第一项" };
     commands.handleProxyCommand(msg);
     commands.handleProxyCommand({ ...msg, raw_message: "/待办 add 实验 报告 token=secret-value" });
     commands.handleProxyCommand({ ...msg, raw_message: "/待办 add 实验 数据" });
@@ -1402,7 +3045,7 @@ function testTodoCandidatesUseFilteredIndexesAndDoNotWriteMemories() {
     savePendingCandidates({
       workspace: temp,
       scope: "group",
-      scopeID: "171290904",
+      scopeID: "987650002",
       candidates: [
         { user: "Alice", user_id: "1", kind: "preference", tags: ["style"], text: "以后回答默认短答", time: "2026-05-24T09:00:00.000Z" },
         { user: "Bob", user_id: "2", kind: "todo", tags: ["todo"], text: "明天记得整理 QQ bot 待办", time: "2026-05-24T09:01:00.000Z" }
@@ -1410,7 +3053,7 @@ function testTodoCandidatesUseFilteredIndexesAndDoNotWriteMemories() {
     });
     const deps = baseCommandDeps({ replies, workspaceForGroup: () => temp });
     const commands = createProxyCommands(deps);
-    const msg = { message_type: "group", group_id: 171290904, user_id: 9, message_id: 2, raw_message: "/待办 候选" };
+    const msg = { message_type: "group", group_id: 987650002, user_id: 9, message_id: 2, raw_message: "/待办 候选" };
     commands.handleProxyCommand(msg);
     assert.match(replies.at(-1), /待办候选/);
     assert.doesNotMatch(replies.at(-1), /默认短答/);
@@ -1498,7 +3141,7 @@ function testWorkspaceOverviewSummarizesCurrentWorkspaceOnly() {
       atOnlyGroups: []
     });
     const commands = createProxyCommands(deps);
-    commands.handleProxyCommand({ message_type: "group", group_id: 1, user_id: 1602858215, message_id: 2, raw_message: "/待办 群A待办事项" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 1, user_id: 1234500001, message_id: 2, raw_message: "/待办 群A待办事项" });
     addFileIndex({
       workspace: groupA,
       scope: "group",
@@ -1512,7 +3155,7 @@ function testWorkspaceOverviewSummarizesCurrentWorkspaceOnly() {
     fs.writeFileSync(path.join(groupA, "memory", "chat-2026-05-24.jsonl"), JSON.stringify({ text: "SHOULD_NOT_APPEAR_IN_OVERVIEW" }) + "\n", "utf8");
     fs.appendFileSync(path.join(groupA, "memory", "todos.jsonl"), "{bad json}\n", "utf8");
 
-    commands.handleProxyCommand({ message_type: "group", group_id: 1, user_id: 1602858215, message_id: 3, raw_message: "/概览" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 1, user_id: 1234500001, message_id: 3, raw_message: "/概览" });
     assert.match(replies.at(-1), /当前概览/);
     assert.match(replies.at(-1), /范围：群 1/);
     assert.match(replies.at(-1), /记忆：有效 1 \/ 总 1/);
@@ -1523,7 +3166,7 @@ function testWorkspaceOverviewSummarizesCurrentWorkspaceOnly() {
     assert.doesNotMatch(replies.at(-1), /SHOULD_NOT_APPEAR_IN_OVERVIEW/);
     assert.doesNotMatch(replies.at(-1), /admin|root|允许群|[A-Za-z]:\\/i);
 
-    commands.handleProxyCommand({ message_type: "group", group_id: 2, user_id: 1602858215, message_id: 4, raw_message: "/概览" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 2, user_id: 1234500001, message_id: 4, raw_message: "/概览" });
     assert.match(replies.at(-1), /范围：群 2/);
     assert.match(replies.at(-1), /记忆：有效 0 \/ 总 0/);
     assert.match(replies.at(-1), /文件：已索引 0，最新 0 个：暂无/);
@@ -1540,9 +3183,9 @@ function testPrivateWorkspaceOverviewIsStableOnEmptyWorkspace() {
   try {
     const deps = baseCommandDeps({ replies, workspaceForPrivateUser: () => temp });
     const commands = createProxyCommands(deps);
-    commands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 2, raw_message: "/工作区" });
+    commands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 2, raw_message: "/工作区" });
     assert.match(replies.at(-1), /当前概览/);
-    assert.match(replies.at(-1), /范围：私聊 1602858215/);
+    assert.match(replies.at(-1), /范围：私聊 1234500001/);
     assert.match(replies.at(-1), /记忆：有效 0 \/ 总 0/);
     assert.match(replies.at(-1), /文件：已索引 0，最新 0 个：暂无/);
     assert.doesNotMatch(replies.at(-1), /\/dream/);
@@ -1699,19 +3342,19 @@ function testWorkspaceReviewPacketPreservesRouteIDsAndMasksSecrets() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-review-packet-ids-"));
   const recentErrorFile = path.join(temp, "recent-errors.jsonl");
   try {
-    appendRecentError({ file: recentErrorFile, event: { kind: "Bearer bearer-secret-value", scope: "group", target: "1107099585", message: "token=secret-value" }, maskSensitive: (value) => value });
-    appendRecentError({ file: recentErrorFile, event: { kind: "token 是 natural-secret-value", scope: "group", target: "1107099585", message: "token=secret-value" }, maskSensitive: (value) => value });
-    appendRecentError({ file: recentErrorFile, event: { kind: "authorization: header-secret-value", scope: "group", target: "1107099585", message: "normal auth header" }, maskSensitive: (value) => value });
-    appendRecentError({ file: recentErrorFile, event: { kind: "token=\"quoted secret value\"", scope: "group", target: "1107099585", message: "quoted token" }, maskSensitive: (value) => value });
-    appendRecentError({ file: recentErrorFile, event: { kind: "token=\"unterminated quoted secret value", scope: "group", target: "1107099585", message: "unterminated quoted token" }, maskSensitive: (value) => value });
-    appendRecentError({ file: recentErrorFile, event: { kind: "authorization: 'Bearer quoted-secret-value'", scope: "group", target: "1107099585", message: "quoted auth header" }, maskSensitive: (value) => value });
-    appendRecentError({ file: recentErrorFile, event: { kind: "authorization='unterminated quoted auth value", scope: "group", target: "1107099585", message: "unterminated quoted auth header" }, maskSensitive: (value) => value });
-    appendRecentError({ file: recentErrorFile, event: { kind: "cookie: \"a=b;c=d\"", scope: "group", target: "1107099585", message: "quoted cookie" }, maskSensitive: (value) => value });
-    appendRecentError({ file: recentErrorFile, event: { kind: "route 1107099585", scope: "group", target: "1107099585", message: "normal route metadata" }, maskSensitive: (value) => value });
+    appendRecentError({ file: recentErrorFile, event: { kind: "Bearer bearer-secret-value", scope: "group", target: "9876500001", message: "token=secret-value" }, maskSensitive: (value) => value });
+    appendRecentError({ file: recentErrorFile, event: { kind: "token 是 natural-secret-value", scope: "group", target: "9876500001", message: "token=secret-value" }, maskSensitive: (value) => value });
+    appendRecentError({ file: recentErrorFile, event: { kind: "authorization: header-secret-value", scope: "group", target: "9876500001", message: "normal auth header" }, maskSensitive: (value) => value });
+    appendRecentError({ file: recentErrorFile, event: { kind: "token=\"quoted secret value\"", scope: "group", target: "9876500001", message: "quoted token" }, maskSensitive: (value) => value });
+    appendRecentError({ file: recentErrorFile, event: { kind: "token=\"unterminated quoted secret value", scope: "group", target: "9876500001", message: "unterminated quoted token" }, maskSensitive: (value) => value });
+    appendRecentError({ file: recentErrorFile, event: { kind: "authorization: 'Bearer quoted-secret-value'", scope: "group", target: "9876500001", message: "quoted auth header" }, maskSensitive: (value) => value });
+    appendRecentError({ file: recentErrorFile, event: { kind: "authorization='unterminated quoted auth value", scope: "group", target: "9876500001", message: "unterminated quoted auth header" }, maskSensitive: (value) => value });
+    appendRecentError({ file: recentErrorFile, event: { kind: "cookie: \"a=b;c=d\"", scope: "group", target: "9876500001", message: "quoted cookie" }, maskSensitive: (value) => value });
+    appendRecentError({ file: recentErrorFile, event: { kind: "route 9876500001", scope: "group", target: "9876500001", message: "normal route metadata" }, maskSensitive: (value) => value });
     const deps = baseCommandDeps({
       replies,
       workspaceForGroup: () => temp,
-      allowedGroups: [1107099585],
+      allowedGroups: [9876500001],
       atOnlyGroups: [],
       recentErrorFile,
       maskSensitive: (value) => String(value)
@@ -1721,20 +3364,20 @@ function testWorkspaceReviewPacketPreservesRouteIDsAndMasksSecrets() {
     const commands = createProxyCommands(deps);
     commands.handleProxyCommand({
       message_type: "group",
-      group_id: 1107099585,
-      user_id: 1602858215,
+      group_id: 9876500001,
+      user_id: 1234500001,
       message_id: 2,
       raw_message: "/建议箱 add 路由候选 | 当前 workspace 小测试"
     });
     commands.handleProxyCommand({
       message_type: "group",
-      group_id: 1107099585,
-      user_id: 1602858215,
+      group_id: 9876500001,
+      user_id: 1234500001,
       message_id: 3,
       raw_message: "/审查包"
     });
 
-    assert.match(replies.at(-1), /范围：group:1107099585/);
+    assert.match(replies.at(-1), /范围：group:9876500001/);
     assert.doesNotMatch(replies.at(-1), /11\*\*\*85/);
     assert.match(replies.at(-1), /路由候选/);
     assert.match(replies.at(-1), /Bearer \*\*\*:1/);
@@ -1742,7 +3385,7 @@ function testWorkspaceReviewPacketPreservesRouteIDsAndMasksSecrets() {
     assert.match(replies.at(-1), /authorization=\*\*\*:1/);
     assert.match(replies.at(-1), /token=\*\*\*:1/);
     assert.match(replies.at(-1), /cookie=\*\*\*:1/);
-    assert.match(replies.at(-1), /route 1107099585:1/);
+    assert.match(replies.at(-1), /route 9876500001:1/);
     assert.doesNotMatch(replies.at(-1), /secret-value|natural-secret-value|bearer-secret-value|header-secret-value|quoted secret value|unterminated quoted secret value|quoted-secret-value|unterminated quoted auth value|a=b;c=d/);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
@@ -1817,7 +3460,7 @@ function testTodaySummaryShowsMemoryCandidatesWithoutSecrets() {
       todayLocal: () => "2026-05-24"
     });
     const commands = createProxyCommands(deps);
-    commands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/总结今天" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/总结今天" });
     assert.match(replies[0], /候选可沉淀记忆（未自动写入）/);
     assert.match(replies[0], /\[preference\].*Alice/);
     assert.match(replies[0], /\[todo\].*Bob/);
@@ -1829,7 +3472,7 @@ function testTodaySummaryShowsMemoryCandidatesWithoutSecrets() {
     assert.ok(fs.existsSync(pendingPath));
     const pendingRows = fs.readFileSync(pendingPath, "utf8").trim().split(/\r?\n/).map(JSON.parse);
     assert.ok(pendingRows.length >= 3);
-    assert.ok(pendingRows.every((row) => row.scope === "group" && row.scope_id === "171290904"));
+    assert.ok(pendingRows.every((row) => row.scope === "group" && row.scope_id === "987650002"));
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
@@ -1850,7 +3493,7 @@ function testPendingMemoryCanBeListedAndAppliedOnce() {
       todayLocal: () => "2026-05-24"
     });
     const commands = createProxyCommands(deps);
-    const msg = { message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/总结今天" };
+    const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/总结今天" };
     commands.handleProxyCommand(msg);
     commands.handleProxyCommand({ ...msg, raw_message: "/候选记忆" });
     assert.match(replies.at(-1), /候选记忆/);
@@ -1883,7 +3526,7 @@ function testPendingMemoryCanBeSkippedAndStatsWork() {
       todayLocal: () => "2026-05-24"
     });
     const commands = createProxyCommands(deps);
-    const msg = { message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/总结今天" };
+    const msg = { message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/总结今天" };
     commands.handleProxyCommand(msg);
     commands.handleProxyCommand({ ...msg, raw_message: "/跳过候选记忆 1" });
     assert.match(replies.at(-1), /已跳过 1 条候选记忆/);
@@ -2314,7 +3957,7 @@ function testPendingMemorySearchPreservesGlobalActiveIndexes() {
       todayLocal: () => "2026-05-24"
     });
     const commands = createProxyCommands(deps);
-    const msg = { message_type: "group", group_id: 171290904, user_id: 9, message_id: 2, raw_message: "/总结今天" };
+    const msg = { message_type: "group", group_id: 987650002, user_id: 9, message_id: 2, raw_message: "/总结今天" };
     commands.handleProxyCommand(msg);
 
     commands.handleProxyCommand({ ...msg, raw_message: "/候选记忆 Bob todo" });
@@ -2414,7 +4057,7 @@ function testRecentErrorsCommandUsesStructuredFile() {
       event: {
         kind: "dream",
         scope: "group",
-        target: "1107099585",
+        target: "9876500001",
         message: "codex exit 1 token=\"quoted secret value\"",
         detail: "authorization='unterminated quoted auth value"
       }
@@ -2425,11 +4068,11 @@ function testRecentErrorsCommandUsesStructuredFile() {
       maskSensitive: sharedMaskSensitive
     });
     const commands = createProxyCommands(deps);
-    commands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/最近错误" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/最近错误" });
     assert.match(replies[0], /最近错误/);
     assert.match(replies[0], /\[dream\]/);
     assert.match(replies[0], /codex exit 1/);
-    assert.match(replies[0], /group 1107099585/);
+    assert.match(replies[0], /group 9876500001/);
     assert.match(replies[0], /token=\*\*\*/);
     assert.match(replies[0], /authorization=\*\*\*/);
     assert.doesNotMatch(replies[0], /quoted secret value|unterminated quoted auth value/);
@@ -2440,8 +4083,8 @@ function testRecentErrorsCommandUsesStructuredFile() {
 
 function testSharedSensitiveRedactionKeepsRouteIDs() {
   const input = [
-    "group 1107099585",
-    "private 1602858215",
+    "group 9876500001",
+    "private 1234500001",
     "token=\"quoted secret value\":1",
     "authorization='unterminated quoted auth value:1",
     "Bearer bearer-secret-value:1",
@@ -2450,8 +4093,8 @@ function testSharedSensitiveRedactionKeepsRouteIDs() {
     `sk-${"abcdefghijklmnopqrstuvwxyz"}`
   ].join(",");
   const out = redactSecrets(input);
-  assert.match(out, /group 1107099585/);
-  assert.match(out, /private 1602858215/);
+  assert.match(out, /group 9876500001/);
+  assert.match(out, /private 1234500001/);
   assert.match(out, /token=\*\*\*:1/);
   assert.match(out, /authorization=\*\*\*:1/);
   assert.match(out, /Bearer \*\*\*:1/);
@@ -2468,9 +4111,9 @@ function testSharedSensitiveRedactionKeepsRouteIDs() {
   const sessionCookieKey = ["session", "cookie"].join("_");
   const privateKey = ["private", "key"].join("_");
   const objectOut = sharedMaskSensitive({
-    group: 1107099585,
-    group_id: 1107099585,
-    private_user: 1602858215,
+    group: 9876500001,
+    group_id: 9876500001,
+    private_user: 1234500001,
     token: "object-token-secret",
     api_key: "object-api-secret",
     [accessKey]: "object-access-secret",
@@ -2485,9 +4128,9 @@ function testSharedSensitiveRedactionKeepsRouteIDs() {
     cookie: "object-cookie-secret",
     secret: "object-generic-secret"
   });
-  assert.match(objectOut, /"group":1107099585/);
-  assert.match(objectOut, /"group_id":1107099585/);
-  assert.match(objectOut, /"private_user":1602858215/);
+  assert.match(objectOut, /"group":9876500001/);
+  assert.match(objectOut, /"group_id":9876500001/);
+  assert.match(objectOut, /"private_user":1234500001/);
   assert.match(objectOut, /"token":"\*\*\*"/);
   assert.match(objectOut, /"api_key":"\*\*\*"/);
   assert.match(objectOut, new RegExp(`"${accessKey}":"\\*\\*\\*"`));
@@ -2501,8 +4144,8 @@ function testSharedSensitiveRedactionKeepsRouteIDs() {
   assert.match(objectOut, /"authorization":"\*\*\*"/);
   assert.match(objectOut, /"cookie":"\*\*\*"/);
   assert.match(objectOut, /"secret":"\*\*\*"/);
-  assert.strictEqual(sharedLooksSensitive({ [accessKey]: "object-access-secret", group: 1107099585 }), true);
-  assert.strictEqual(sharedLooksSensitive({ group: 1107099585, message: "route metadata only" }), false);
+  assert.strictEqual(sharedLooksSensitive({ [accessKey]: "object-access-secret", group: 9876500001 }), true);
+  assert.strictEqual(sharedLooksSensitive({ group: 9876500001, message: "route metadata only" }), false);
   assert.doesNotMatch(objectOut, /object-token-secret|object-api-secret|object-access-secret|object-refresh-secret|object-client-secret|object-auth-secret|object-bot-secret|object-session-cookie-secret|object-private-key-secret|object-password-secret|object-bearer-secret|object-cookie-secret|object-generic-secret/);
 }
 
@@ -2519,14 +4162,14 @@ function testSharedRedactionCoversCompositeKeyForms() {
   for (const parts of keyParts) {
     for (const sep of ["_", "-"]) {
       const key = parts.join(sep);
-      const raw = `route group_id 1107099585,${key}=plain-hidden-value,${key}:"quoted hidden value",${key} 是 natural-hidden-value`;
+      const raw = `route group_id 9876500001,${key}=plain-hidden-value,${key}:"quoted hidden value",${key} 是 natural-hidden-value`;
       const out = redactSecrets(raw);
-      assert.match(out, /group_id 1107099585/);
+      assert.match(out, /group_id 9876500001/);
       assert.match(out, new RegExp(`${key}=\\*\\*\\*`));
       assert.match(out, new RegExp(`${key} 是 \\*\\*\\*`));
-      assert.strictEqual(sharedLooksSensitive({ [key]: "object-hidden-value", group_id: 1107099585 }), true);
-      const objectOut = sharedMaskSensitive({ [key]: "object-hidden-value", group_id: 1107099585 });
-      assert.match(objectOut, /"group_id":1107099585/);
+      assert.strictEqual(sharedLooksSensitive({ [key]: "object-hidden-value", group_id: 9876500001 }), true);
+      const objectOut = sharedMaskSensitive({ [key]: "object-hidden-value", group_id: 9876500001 });
+      assert.match(objectOut, /"group_id":9876500001/);
       assert.match(objectOut, new RegExp(`"${key}":"\\*\\*\\*"`));
       assert.doesNotMatch(objectOut, /object-hidden-value/);
       assert.doesNotMatch(out, /plain-hidden-value|quoted hidden value|natural-hidden-value/);
@@ -2537,17 +4180,17 @@ function testSharedRedactionCoversCompositeKeyForms() {
 function testSharedRedactionCoversNestedObjects() {
   const apiTokenKey = ["api", "token"].join("-");
   const nestedOut = sharedMaskSensitive({
-    group_id: 1107099585,
+    group_id: 9876500001,
     payload: [
       {
         [apiTokenKey]: "nested-hidden-value",
-        group_id: 1107099585
+        group_id: 9876500001
       }
     ]
   });
-  assert.match(nestedOut, /"group_id":1107099585/);
+  assert.match(nestedOut, /"group_id":9876500001/);
   assert.match(nestedOut, new RegExp(`"${apiTokenKey}":"\\*\\*\\*"`));
-  assert.strictEqual(sharedLooksSensitive({ payload: [{ [apiTokenKey]: "nested-hidden-value", group_id: 1107099585 }] }), true);
+  assert.strictEqual(sharedLooksSensitive({ payload: [{ [apiTokenKey]: "nested-hidden-value", group_id: 9876500001 }] }), true);
   assert.doesNotMatch(nestedOut, /nested-hidden-value/);
 }
 
@@ -2560,19 +4203,19 @@ function testSharedRedactionCoversProviderEnvKeys() {
     ["GOOGLE", "GENERATIVE", "AI", "API", "KEY"]
   ].map((parts) => parts.join("_"));
   for (const key of providerKeys) {
-    const objectOut = sharedMaskSensitive({ [key]: "provider-hidden-value", group_id: 1107099585 });
-    assert.match(objectOut, /"group_id":1107099585/);
+    const objectOut = sharedMaskSensitive({ [key]: "provider-hidden-value", group_id: 9876500001 });
+    assert.match(objectOut, /"group_id":9876500001/);
     assert.match(objectOut, new RegExp(`"${key}":"\\*\\*\\*"`));
-    assert.strictEqual(sharedLooksSensitive({ [key]: "provider-hidden-value", group_id: 1107099585 }), true);
+    assert.strictEqual(sharedLooksSensitive({ [key]: "provider-hidden-value", group_id: 9876500001 }), true);
     assert.doesNotMatch(objectOut, /provider-hidden-value/);
 
-    const rawOut = redactSecrets(`group_id 1107099585 ${key}=provider-hidden-value ${key}="quoted-provider-hidden-value"`);
-    assert.match(rawOut, /group_id 1107099585/);
+    const rawOut = redactSecrets(`group_id 9876500001 ${key}=provider-hidden-value ${key}="quoted-provider-hidden-value"`);
+    assert.match(rawOut, /group_id 9876500001/);
     assert.match(rawOut, new RegExp(`${key}=\\*\\*\\*`));
     assert.doesNotMatch(rawOut, /provider-hidden-value|quoted-provider-hidden-value/);
 
-    const shellOut = redactSecrets(`group_id 1107099585 export ${key}=shell-hidden-value ${key} = spaced-hidden-value ${key}='single-quoted-hidden-value'`);
-    assert.match(shellOut, /group_id 1107099585/);
+    const shellOut = redactSecrets(`group_id 9876500001 export ${key}=shell-hidden-value ${key} = spaced-hidden-value ${key}='single-quoted-hidden-value'`);
+    assert.match(shellOut, /group_id 9876500001/);
     assert.match(shellOut, new RegExp(`${key}=\\*\\*\\*`));
     assert.doesNotMatch(shellOut, /shell-hidden-value|spaced-hidden-value|single-quoted-hidden-value/);
   }
@@ -2584,34 +4227,34 @@ function testSharedRedactionCorpusKeepsRoutesAndMasksSecrets() {
   const cases = [
     {
       name: "raw env",
-      input: `group_id 1107099585 ${providerKey}=corpus-env-hidden`,
-      objectInput: { group_id: 1107099585, [providerKey]: "corpus-env-hidden" },
-      retained: [/group_id 1107099585/, new RegExp(`${providerKey}=\\*\\*\\*`)],
-      objectRetained: [/"group_id":1107099585/, new RegExp(`"${providerKey}":"\\*\\*\\*"`)],
+      input: `group_id 9876500001 ${providerKey}=corpus-env-hidden`,
+      objectInput: { group_id: 9876500001, [providerKey]: "corpus-env-hidden" },
+      retained: [/group_id 9876500001/, new RegExp(`${providerKey}=\\*\\*\\*`)],
+      objectRetained: [/"group_id":9876500001/, new RegExp(`"${providerKey}":"\\*\\*\\*"`)],
       leaked: /corpus-env-hidden/
     },
     {
       name: "shell export",
-      input: `private 1602858215 export ${providerKey}='corpus-shell-hidden'`,
-      objectInput: { private_user: 1602858215, [providerKey]: "corpus-shell-hidden" },
-      retained: [/private 1602858215/, new RegExp(`${providerKey}=\\*\\*\\*`)],
-      objectRetained: [/"private_user":1602858215/, new RegExp(`"${providerKey}":"\\*\\*\\*"`)],
+      input: `private 1234500001 export ${providerKey}='corpus-shell-hidden'`,
+      objectInput: { private_user: 1234500001, [providerKey]: "corpus-shell-hidden" },
+      retained: [/private 1234500001/, new RegExp(`${providerKey}=\\*\\*\\*`)],
+      objectRetained: [/"private_user":1234500001/, new RegExp(`"${providerKey}":"\\*\\*\\*"`)],
       leaked: /corpus-shell-hidden/
     },
     {
       name: "json object",
-      input: JSON.stringify({ group_id: 1107099585, [apiTokenKey]: "corpus-json-hidden" }),
-      objectInput: { group_id: 1107099585, [apiTokenKey]: "corpus-json-hidden" },
-      retained: [/"group_id":1107099585/, new RegExp(`"${apiTokenKey}":"\\*\\*\\*"`)],
-      objectRetained: [/"group_id":1107099585/, new RegExp(`"${apiTokenKey}":"\\*\\*\\*"`)],
+      input: JSON.stringify({ group_id: 9876500001, [apiTokenKey]: "corpus-json-hidden" }),
+      objectInput: { group_id: 9876500001, [apiTokenKey]: "corpus-json-hidden" },
+      retained: [/"group_id":9876500001/, new RegExp(`"${apiTokenKey}":"\\*\\*\\*"`)],
+      objectRetained: [/"group_id":9876500001/, new RegExp(`"${apiTokenKey}":"\\*\\*\\*"`)],
       leaked: /corpus-json-hidden/
     },
     {
       name: "natural language",
-      input: "group 1107099585 token 是 corpus-natural-hidden",
-      objectInput: { group_id: 1107099585, token: "corpus-natural-hidden" },
-      retained: [/group 1107099585/, /token 是 \*\*\*/],
-      objectRetained: [/"group_id":1107099585/, /"token":"\*\*\*"/],
+      input: "group 9876500001 token 是 corpus-natural-hidden",
+      objectInput: { group_id: 9876500001, token: "corpus-natural-hidden" },
+      retained: [/group 9876500001/, /token 是 \*\*\*/],
+      objectRetained: [/"group_id":9876500001/, /"token":"\*\*\*"/],
       leaked: /corpus-natural-hidden/
     }
   ];
@@ -2634,21 +4277,21 @@ function testSharedRedactionRouteOnlyCorpusIsNotSensitive() {
   const cases = [
     {
       name: "group route",
-      input: "group_id 1107099585 route listen=3002 at=3003",
-      objectInput: { group_id: 1107099585, route: { listen: 3002, at: 3003 } },
-      retained: [/1107099585/, /3002/, /3003/]
+      input: "group_id 9876500001 route listen=3002 at=3003",
+      objectInput: { group_id: 9876500001, route: { listen: 3002, at: 3003 } },
+      retained: [/9876500001/, /3002/, /3003/]
     },
     {
       name: "admin private route",
-      input: "private_user 1602858215 admin root route project_root",
-      objectInput: { private_user: 1602858215, admin_route: "project_root", root_enabled: true },
-      retained: [/1602858215/, /project_root/]
+      input: "private_user 1234500001 admin root route project_root",
+      objectInput: { private_user: 1234500001, admin_route: "project_root", root_enabled: true },
+      retained: [/1234500001/, /project_root/]
     },
     {
       name: "known users",
-      input: "allowed_private_users 1602858215 2138730775 allowed_groups 1107099585",
-      objectInput: { allowed_private_users: [1602858215, 2138730775], allowed_groups: [1107099585] },
-      retained: [/1602858215/, /2138730775/, /1107099585/]
+      input: "allowed_private_users 1234500001 1234500002 allowed_groups 9876500001",
+      objectInput: { allowed_private_users: [1234500001, 1234500002], allowed_groups: [9876500001] },
+      retained: [/1234500001/, /1234500002/, /9876500001/]
     }
   ];
   for (const item of cases) {
@@ -2670,35 +4313,35 @@ function testSharedRedactionCoversMemoryProposalTodoOutputs() {
     savePendingCandidates({
       workspace: temp,
       scope: "group",
-      scopeID: "1107099585",
+      scopeID: "9876500001",
       candidates: [{
         user: "Alice",
         user_id: "1",
         kind: "note",
         tags: [],
-        text: "route 1107099585 token=\"quoted secret value\"",
+        text: "route 9876500001 token=\"quoted secret value\"",
         time: "2026-05-24T09:00:00.000Z"
       }]
     });
     const commands = createProxyCommands(baseCommandDeps({
       replies,
       workspaceForGroup: () => temp,
-      allowedGroups: [1107099585],
+      allowedGroups: [9876500001],
       atOnlyGroups: []
     }));
 
-    commands.handleProxyCommand({ message_type: "group", group_id: 1107099585, user_id: 1, message_id: 2, raw_message: "/候选记忆 分拣" });
-    assert.match(replies.at(-1), /route 1107099585 token=\*\*\*/);
+    commands.handleProxyCommand({ message_type: "group", group_id: 9876500001, user_id: 1, message_id: 2, raw_message: "/候选记忆 分拣" });
+    assert.match(replies.at(-1), /route 9876500001 token=\*\*\*/);
     assert.doesNotMatch(replies.at(-1), /quoted secret value/);
 
-    commands.handleProxyCommand({ message_type: "group", group_id: 1107099585, user_id: 1, message_id: 3, raw_message: "/建议箱 add 路由建议 | route 1107099585 Bearer bearer-secret-value" });
-    commands.handleProxyCommand({ message_type: "group", group_id: 1107099585, user_id: 1, message_id: 4, raw_message: "/建议箱 导出 all" });
-    assert.match(replies.at(-1), /route 1107099585 Bearer \*\*\*/);
+    commands.handleProxyCommand({ message_type: "group", group_id: 9876500001, user_id: 1, message_id: 3, raw_message: "/建议箱 add 路由建议 | route 9876500001 Bearer bearer-secret-value" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 9876500001, user_id: 1, message_id: 4, raw_message: "/建议箱 导出 all" });
+    assert.match(replies.at(-1), /route 9876500001 Bearer \*\*\*/);
     assert.doesNotMatch(replies.at(-1), /bearer-secret-value/);
 
-    commands.handleProxyCommand({ message_type: "group", group_id: 1107099585, user_id: 1, message_id: 5, raw_message: "/待办 add route 1107099585 secret 是 natural-secret-value" });
-    commands.handleProxyCommand({ message_type: "group", group_id: 1107099585, user_id: 1, message_id: 6, raw_message: "/待办" });
-    assert.match(replies.at(-1), /route 1107099585 secret 是 \*\*\*/);
+    commands.handleProxyCommand({ message_type: "group", group_id: 9876500001, user_id: 1, message_id: 5, raw_message: "/待办 add route 9876500001 secret 是 natural-secret-value" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 9876500001, user_id: 1, message_id: 6, raw_message: "/待办" });
+    assert.match(replies.at(-1), /route 9876500001 secret 是 \*\*\*/);
     assert.doesNotMatch(replies.at(-1), /natural-secret-value/);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
@@ -2712,7 +4355,7 @@ function testRecentFilesCommandUsesStructuredIndex() {
     addFileIndex({
       workspace: temp,
       scope: "group",
-      scopeID: "171290904",
+      scopeID: "987650002",
       userID: "1",
       name: "lecture.txt",
       originalName: "lecture.txt",
@@ -2723,7 +4366,7 @@ function testRecentFilesCommandUsesStructuredIndex() {
     });
     const deps = baseCommandDeps({ replies, workspaceForGroup: () => temp });
     const commands = createProxyCommands(deps);
-    commands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/最近文件" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/最近文件" });
     assert.match(replies[0], /最近文件/);
     assert.match(replies[0], /lecture.txt/);
     assert.match(replies[0], /已提取/);
@@ -2738,7 +4381,7 @@ function testFileStatsCountsIndexOnlyAndBadLines() {
     addFileIndex({
       workspace: temp,
       scope: "group",
-      scopeID: "171290904",
+      scopeID: "987650002",
       name: "a.pdf",
       relativePath: "local_files/archive/a.pdf",
       size: 1024,
@@ -2748,7 +4391,7 @@ function testFileStatsCountsIndexOnlyAndBadLines() {
     addFileIndex({
       workspace: temp,
       scope: "group",
-      scopeID: "171290904",
+      scopeID: "987650002",
       name: "b.txt",
       relativePath: "local_files/archive/b.txt",
       size: 2048,
@@ -2858,7 +4501,7 @@ function testFindFilesPrefersStructuredIndexAndToleratesBadLine() {
     addFileIndex({
       workspace: temp,
       scope: "group",
-      scopeID: "171290904",
+      scopeID: "987650002",
       name: "quantum-notes.pdf",
       originalName: "量子笔记.pdf",
       relativePath: "local_files/archive/2026-05-23/quantum-notes.pdf",
@@ -2869,7 +4512,7 @@ function testFindFilesPrefersStructuredIndexAndToleratesBadLine() {
     appendLine(path.join(temp, "local_files", "INDEX.md"), "- legacy quantum file");
     const deps = baseCommandDeps({ replies, workspaceForGroup: () => temp });
     const commands = createProxyCommands(deps);
-    commands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/找文件 quantum" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/找文件 quantum" });
     assert.match(replies[0], /找到这些文件/);
     assert.match(replies[0], /quantum-notes.pdf/);
     assert.doesNotMatch(replies[0], /legacy quantum file/);
@@ -2880,7 +4523,7 @@ function testFindFilesPrefersStructuredIndexAndToleratesBadLine() {
 
 function testAdminCommandRequiresRootAdmin() {
   const replies = [];
-  const deps = baseCommandDeps({ replies, adminRootUsers: [1602858215], adminUsers: [1602858215] });
+  const deps = baseCommandDeps({ replies, adminRootUsers: [1234500001], adminUsers: [1234500001] });
   const commands = createProxyCommands(deps);
   commands.handleProxyCommand({ message_type: "private", user_id: 1, message_id: 2, raw_message: "/admin status" });
   assert.strictEqual(replies[0], "没有权限。");
@@ -2890,23 +4533,23 @@ function testAdminWorkspaceSeparatesMemoryAndExecutionRoot() {
   const replies = [];
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-admin-"));
   try {
-    const memoryDir = path.join(temp, "users", "1602858215");
+    const memoryDir = path.join(temp, "users", "1234500001");
     const rootDir = temp;
     const deps = baseCommandDeps({
       replies,
-      adminRootUsers: [1602858215],
-      adminUsers: [1602858215],
+      adminRootUsers: [1234500001],
+      adminUsers: [1234500001],
       projectRoot: rootDir,
       workspaceForPrivateUser: () => memoryDir,
       executionWorkspaceForPrivateUser: () => rootDir,
       appendLine
     });
     const commands = createProxyCommands(deps);
-    commands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 2, raw_message: "/admin workspace" });
+    commands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 2, raw_message: "/admin workspace" });
     assert.match(replies[0], /管理员工作区/);
     assert.match(replies[0], /记忆目录/);
     assert.match(replies[0], /执行目录/);
-    assert.match(replies[0], /1602858215/);
+    assert.match(replies[0], /1234500001/);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
@@ -2916,12 +4559,12 @@ function testAdminPrivateRememberUsesUserWorkspaceNotExecutionRoot() {
   const replies = [];
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-admin-memory-"));
   try {
-    const memoryDir = path.join(temp, "users", "1602858215");
+    const memoryDir = path.join(temp, "users", "1234500001");
     const rootDir = temp;
     const deps = baseCommandDeps({
       replies,
-      adminRootUsers: [1602858215],
-      adminUsers: [1602858215],
+      adminRootUsers: [1234500001],
+      adminUsers: [1234500001],
       projectRoot: rootDir,
       workspaceForPrivateUser: () => memoryDir,
       executionWorkspaceForPrivateUser: () => rootDir,
@@ -2930,7 +4573,7 @@ function testAdminPrivateRememberUsesUserWorkspaceNotExecutionRoot() {
     const commands = createProxyCommands(deps);
     const msg = {
       message_type: "private",
-      user_id: 1602858215,
+      user_id: 1234500001,
       message_id: 2,
       raw_message: "/记住 我喜欢普通聊天也保留私聊记忆"
     };
@@ -2949,8 +4592,8 @@ function testAdminPrivateRememberUsesUserWorkspaceNotExecutionRoot() {
     const rows = fs.readFileSync(userMemoryFile, "utf8").trim().split(/\r?\n/).map(JSON.parse);
     assert.strictEqual(rows.length, 1);
     assert.strictEqual(rows[0].scope, "private");
-    assert.strictEqual(rows[0].scope_id, "1602858215");
-    assert.strictEqual(rows[0].subject_id, "1602858215");
+    assert.strictEqual(rows[0].scope_id, "1234500001");
+    assert.strictEqual(rows[0].subject_id, "1234500001");
     assert.match(fs.readFileSync(userProfileFile, "utf8"), /普通聊天也保留私聊记忆/);
 
     commands.handleProxyCommand({ ...msg, message_id: 3, raw_message: "/记忆 私聊记忆" });
@@ -2971,7 +4614,7 @@ function testAdminPrivateMemorySearchUsesUserWorkspaceForSharedCommand() {
   const oldRoot = process.env.OPENCLAW_COMMAND_ROOT;
   const oldPython = process.env.OPENCLAW_COMMAND_PYTHON;
   try {
-    const memoryDir = path.join(temp, "users", "1602858215");
+    const memoryDir = path.join(temp, "users", "1234500001");
     const script = path.join(temp, "capture-shared-command.js");
     fs.writeFileSync(script, "process.stdout.write(JSON.stringify(process.argv.slice(2)));", "utf8");
     process.env.OPENCLAW_COMMAND_SCRIPT = script;
@@ -2979,8 +4622,8 @@ function testAdminPrivateMemorySearchUsesUserWorkspaceForSharedCommand() {
     process.env.OPENCLAW_COMMAND_PYTHON = process.execPath;
     const deps = baseCommandDeps({
       replies,
-      adminRootUsers: [1602858215],
-      adminUsers: [1602858215],
+      adminRootUsers: [1234500001],
+      adminUsers: [1234500001],
       projectRoot: temp,
       workspaceForPrivateUser: () => memoryDir,
       executionWorkspaceForPrivateUser: () => temp
@@ -2989,13 +4632,13 @@ function testAdminPrivateMemorySearchUsesUserWorkspaceForSharedCommand() {
 
     commands.handleProxyCommand({
       message_type: "private",
-      user_id: 1602858215,
+      user_id: 1234500001,
       message_id: 2,
       raw_message: "/记忆 search 私聊记忆"
     });
 
     const args = JSON.parse(replies.at(-1));
-    const userWorkspaceName = ["users", "1602858215"].join("/");
+    const userWorkspaceName = ["users", "1234500001"].join("/");
     assert.deepStrictEqual(args.slice(0, 4), ["--root", temp, "--workspace", userWorkspaceName]);
     assert.deepStrictEqual(args.slice(4), ["/memory", "search", "私聊记忆"]);
   } finally {
@@ -3018,31 +4661,31 @@ function testSharedCommandWorkspaceNameNormalization() {
     process.env.OPENCLAW_COMMAND_SCRIPT = script;
     process.env.OPENCLAW_COMMAND_ROOT = temp;
     process.env.OPENCLAW_COMMAND_PYTHON = process.execPath;
-    const groupWorkspace = path.join(temp, "groups", "171290904");
-    const sandboxGroupWorkspace = path.join(temp, "groups", "sandbox-171290904");
-    const privateWorkspace = path.join(temp, "users", "1602858215");
+    const groupWorkspace = path.join(temp, "groups", "987650002");
+    const sandboxGroupWorkspace = path.join(temp, "groups", "sandbox-987650002");
+    const privateWorkspace = path.join(temp, "users", "1234500001");
     const customWorkspace = path.join(temp, "custom-private");
     let currentGroupWorkspace = groupWorkspace;
     const deps = baseCommandDeps({
       replies,
       projectRoot: temp,
       workspaceForGroup: () => currentGroupWorkspace,
-      workspaceForPrivateUser: (userID) => Number(userID) === 1602858215 ? privateWorkspace : customWorkspace
+      workspaceForPrivateUser: (userID) => Number(userID) === 1234500001 ? privateWorkspace : customWorkspace
     });
     const commands = createProxyCommands(deps);
 
-    commands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 2, raw_message: "/记忆 search 群记忆" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 2, raw_message: "/记忆 search 群记忆" });
     let args = JSON.parse(replies.at(-1));
-    assert.deepStrictEqual(args.slice(0, 4), ["--root", temp, "--workspace", ["groups", "171290904"].join("/")]);
+    assert.deepStrictEqual(args.slice(0, 4), ["--root", temp, "--workspace", ["groups", "987650002"].join("/")]);
 
     currentGroupWorkspace = sandboxGroupWorkspace;
-    commands.handleProxyCommand({ message_type: "group", group_id: 171290904, user_id: 1, message_id: 5, raw_message: "/记忆 search 沙盒群记忆" });
+    commands.handleProxyCommand({ message_type: "group", group_id: 987650002, user_id: 1, message_id: 5, raw_message: "/记忆 search 沙盒群记忆" });
     args = JSON.parse(replies.at(-1));
-    assert.deepStrictEqual(args.slice(0, 4), ["--root", temp, "--workspace", ["groups", "sandbox-171290904"].join("/")]);
+    assert.deepStrictEqual(args.slice(0, 4), ["--root", temp, "--workspace", ["groups", "sandbox-987650002"].join("/")]);
 
-    commands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 3, raw_message: "/记忆 search 私聊记忆" });
+    commands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 3, raw_message: "/记忆 search 私聊记忆" });
     args = JSON.parse(replies.at(-1));
-    assert.deepStrictEqual(args.slice(0, 4), ["--root", temp, "--workspace", ["users", "1602858215"].join("/")]);
+    assert.deepStrictEqual(args.slice(0, 4), ["--root", temp, "--workspace", ["users", "1234500001"].join("/")]);
 
     commands.handleProxyCommand({ message_type: "private", user_id: 42, message_id: 4, raw_message: "/记忆 search 自定义目录" });
     args = JSON.parse(replies.at(-1));
@@ -3060,34 +4703,34 @@ function testAdminModeCanChangeGroupFromPrivateChat() {
   const listenModeByGroup = new Map();
   const deps = baseCommandDeps({
     replies,
-    adminRootUsers: [1602858215],
-    adminUsers: [1602858215],
-    allowedGroups: [1107099585],
+    adminRootUsers: [1234500001],
+    adminUsers: [1234500001],
+    allowedGroups: [9876500001],
     atOnlyGroups: [],
     listenModeByGroup,
     workspaceForGroup: () => fs.mkdtempSync(path.join(os.tmpdir(), "proxy-admin-mode-")),
     appendLine
   });
   const commands = createProxyCommands(deps);
-  commands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 2, raw_message: "/admin mode 1107099585 all" });
-  assert.strictEqual(listenModeByGroup.get(1107099585), "all");
-  assert.match(replies[0], /已切换群 1107099585/);
+  commands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 2, raw_message: "/admin mode 9876500001 all" });
+  assert.strictEqual(listenModeByGroup.get(9876500001), "all");
+  assert.match(replies[0], /已切换群 9876500001/);
 }
 
 function testAdminRoutesShowPortMaps() {
   const replies = [];
   const deps = baseCommandDeps({
     replies,
-    adminRootUsers: [1602858215],
-    adminUsers: [1602858215],
-    groupRoutes: new Map([[1107099585, { listenPort: 3002, atPort: 3003 }]]),
-    privateRoutes: new Map([[1602858215, { port: 3011 }]])
+    adminRootUsers: [1234500001],
+    adminUsers: [1234500001],
+    groupRoutes: new Map([[9876500001, { listenPort: 3002, atPort: 3003 }]]),
+    privateRoutes: new Map([[1234500001, { port: 3011 }]])
   });
   const commands = createProxyCommands(deps);
-  commands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 2, raw_message: "/admin routes" });
+  commands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 2, raw_message: "/admin routes" });
   assert.match(replies[0], /群路由/);
-  assert.match(replies[0], /1107099585:3002:3003/);
-  assert.match(replies[0], /1602858215:3011/);
+  assert.match(replies[0], /9876500001:3002:3003/);
+  assert.match(replies[0], /1234500001:3011/);
 }
 
 function testAdminTailReadsOnlyNamedLogsAndMasks() {
@@ -3098,17 +4741,17 @@ function testAdminTailReadsOnlyNamedLogsAndMasks() {
     fs.writeFileSync(logFile, `ok\nOPENAI_API_KEY=${"sk-"}real-secret\n`, "utf8");
     const deps = baseCommandDeps({
       replies,
-      adminRootUsers: [1602858215],
-      adminUsers: [1602858215],
+      adminRootUsers: [1234500001],
+      adminUsers: [1234500001],
       adminLogFiles: { onebot: logFile },
       maskSensitive: (value) => String(value).replace(/sk-[a-z0-9-]+/gi, "sk-***")
     });
     const commands = createProxyCommands(deps);
-    commands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 2, raw_message: "/admin tail onebot 10" });
+    commands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 2, raw_message: "/admin tail onebot 10" });
     assert.match(replies[0], /onebot 日志尾部/);
     assert.match(replies[0], /sk-\*\*\*/);
     assert.doesNotMatch(replies[0], /sk-real-secret/);
-    commands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 3, raw_message: "/admin tail ..\\/secret" });
+    commands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 3, raw_message: "/admin tail ..\\/secret" });
     assert.match(replies[1], /日志名无效/);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
@@ -3120,15 +4763,15 @@ function testAdminReloadCallsRuntimeHook() {
   let called = false;
   const deps = baseCommandDeps({
     replies,
-    adminRootUsers: [1602858215],
-    adminUsers: [1602858215],
+    adminRootUsers: [1234500001],
+    adminUsers: [1234500001],
     reloadRuntime: () => {
       called = true;
       return "reloaded";
     }
   });
   const commands = createProxyCommands(deps);
-  commands.handleProxyCommand({ message_type: "private", user_id: 1602858215, message_id: 2, raw_message: "/admin reload" });
+  commands.handleProxyCommand({ message_type: "private", user_id: 1234500001, message_id: 2, raw_message: "/admin reload" });
   assert.strictEqual(called, true);
   assert.strictEqual(replies[0], "reloaded");
 }
@@ -3148,8 +4791,8 @@ function testDreamPromptsKeepSelfIterationBounded() {
     /[Tt]est suggestions/
   ];
   const promptPaths = [
-    path.join(__dirname, "..", "groups", "sandbox-1107099585", "scripts", "dream_prompt.md"),
-    path.join(__dirname, "..", "groups", "sandbox-171290904", "scripts", "dream_prompt.md"),
+    path.join(__dirname, "..", "groups", "sandbox-9876500001", "scripts", "dream_prompt.md"),
+    path.join(__dirname, "..", "groups", "sandbox-987650002", "scripts", "dream_prompt.md"),
     path.join(__dirname, "..", "docs", "dream-review-template.md")
   ];
 
@@ -3181,7 +4824,7 @@ function testGroupUploadRequestsDownload() {
     });
 
     files.handleGroupUpload({
-      group_id: 171290904,
+      group_id: 987650002,
       user_id: 1,
       message_id: 2,
       file: { id: "file-1", name: "lecture.pdf", size: 12 }
@@ -3220,7 +4863,7 @@ async function testGroupFileDownloadArchivesText() {
     });
 
     const archived = files.handleGroupFileDownloadResponse({
-      groupID: 171290904,
+      groupID: 987650002,
       fileName: "source.txt",
       messageID: 2,
       fileInfo: { name: "source.txt" }
@@ -3255,15 +4898,15 @@ function baseCommandDeps(overrides = {}) {
     sendPrivateText: (_userID, _messageID, text) => replies.push(text),
     sendGroupText: (_groupID, _messageID, text) => replies.push(text),
     healthSnapshot: () => ({ ok: true, upstream: { ready: true }, pending: { upstream_queue: 0, outbound: 0 } }),
-    imageStateKey: () => "group:171290904",
+    imageStateKey: () => "group:987650002",
     imageStates: new Map(),
     effectiveListenMode: () => "mention",
     defaultListenMode: "selective",
-    atOnlyGroups: overrides.atOnlyGroups || [171290904],
+    atOnlyGroups: overrides.atOnlyGroups || [987650002],
     isGroupQuiet: () => false,
     adminUsers: overrides.adminUsers || [],
     adminRootUsers: overrides.adminRootUsers || [],
-    allowedGroups: overrides.allowedGroups || [171290904],
+    allowedGroups: overrides.allowedGroups || [987650002],
     allowedPrivateUsers: overrides.allowedPrivateUsers || [],
     workspaceForGroup: overrides.workspaceForGroup || (() => process.cwd()),
     workspaceForPrivateUser: overrides.workspaceForPrivateUser || (() => process.cwd()),
@@ -3289,8 +4932,1740 @@ function baseCommandDeps(overrides = {}) {
     adminLogFiles: overrides.adminLogFiles || {},
     reloadRuntime: overrides.reloadRuntime,
     recentErrorFile: overrides.recentErrorFile || "",
-    capabilitySnapshot: overrides.capabilitySnapshot || (() => null)
+    capabilitySnapshot: overrides.capabilitySnapshot || (() => null),
+    continuityStatus: overrides.continuityStatus,
+    moodStatus: overrides.moodStatus,
+    feedbackStatus: overrides.feedbackStatus,
+    proactiveStatus: overrides.proactiveStatus,
+    setProactivityLevelForGroup: overrides.setProactivityLevelForGroup,
+    proactiveLevelByGroup: overrides.proactiveLevelByGroup || new Map()
   };
+}
+
+function testEvidencePacketCompactsChatJsonForModelInput() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "evidence-packet-"));
+  const memory = path.join(temp, "memory");
+  fs.mkdirSync(memory, { recursive: true });
+  const chatFile = path.join(memory, "chat-2026-05-24.jsonl");
+  const rows = [
+    {
+      time: "2026-05-24T10:20:00.000Z",
+      message_id: "987654",
+      group_id: "9876500001",
+      user_id: "123456789",
+      sender: { card: "张三", nickname: "nick" },
+      text: "/status",
+      raw_message: "/status"
+    },
+    {
+      time: "2026-05-24T10:21:00.000Z",
+      message_id: "987655",
+      group_id: "9876500001",
+      user_id: "123456789",
+      sender: { card: "张三" },
+      text: "以后默认先给短结论，不要贴一堆 JSON",
+      raw_message: "{\"kind\":\"preference\",\"message_id\":\"987655\"}"
+    },
+    {
+      time: "2026-05-24T10:22:00.000Z",
+      message_id: "987656",
+      group_id: "9876500001",
+      user_id: "223456789",
+      sender: { nickname: "李四" },
+      text: "明天提醒我验证部署",
+      raw_message: "明天提醒我验证部署"
+    },
+    {
+      time: "2026-05-24T10:23:00.000Z",
+      message_id: "987657",
+      group_id: "9876500001",
+      user_id: "323456789",
+      sender: { nickname: "王五" },
+      text: "[CQ:image,file=abc] 上传 report.pdf 报错 timeout",
+      raw_message: "[CQ:image,file=abc] 上传 report.pdf 报错 timeout",
+      has_image: true
+    }
+  ];
+  fs.writeFileSync(chatFile, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
+
+  const packet = buildEvidencePacket({
+    workspace: temp,
+    files: [chatFile],
+    purpose: "profile_update",
+    now: new Date("2026-05-24T12:00:00.000Z"),
+    maxItemsPerKind: 4,
+    maxChars: 4000
+  });
+
+  assert.match(packet.text, /^字段顺序：类别 \| 时间 \| 用户 \| 内容 \| 原因/m);
+  assert.match(packet.text, /偏好 \| 05-24 \d\d:21 \| 张三 \| 以后默认先给短结论/);
+  assert.match(packet.text, /待办 \| 05-24 \d\d:22 \| 李四 \| 明天提醒我验证部署/);
+  assert.match(packet.text, /问题 \| 05-24 \d\d:23 \| 王五 \| 图片 上传 report\.pdf 报错 timeout/);
+  assert.doesNotMatch(packet.text, /message_id|987654|987655|group_id|raw_message|"\w+":|[{}[\]"]/);
+  assert.strictEqual(packet.stats.records_scanned, 4);
+  assert.strictEqual(packet.stats.records_after_filter, 3);
+  assert.ok(packet.sourceMap.some((item) => item.message_id === "987655"));
+}
+
+function testJSONLShardWriterRollsOverAndReadsAllShards() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "jsonl-shard-"));
+  const file = path.join(temp, "chat-2026-05-24.jsonl");
+  appendJSONObject(file, { id: 1, text: "a".repeat(80) }, { maxBytes: 120 });
+  appendJSONObject(file, { id: 2, text: "b".repeat(80) }, { maxBytes: 120 });
+  appendJSONObject(file, { id: 3, text: "c".repeat(80) }, { maxBytes: 120 });
+
+  const shards = listJSONLShards(file).map((item) => path.basename(item));
+  assert.deepStrictEqual(shards, ["chat-2026-05-24.jsonl", "chat-2026-05-24-001.jsonl", "chat-2026-05-24-002.jsonl"]);
+  assert.deepStrictEqual(readJSONLShards(file).map((item) => item.id), [1, 2, 3]);
+}
+
+function testRotaSchedulerParsesWeeklyDutyRequestAndRotates() {
+  const parsed = parseRotaRequest("@bot 每周日晚上7点发送值日提醒，A、B、C、D 分别干拖地，厕所，洗手台，轮休。然后每周往下顺一个工作", {
+    groupID: 987650002,
+    userID: 9,
+    startDate: "2026-05-24"
+  });
+  assert.ok(parsed);
+  assert.strictEqual(parsed.day_of_week, 0);
+  assert.strictEqual(parsed.time, "19:00");
+  assert.deepStrictEqual(parsed.members, ["A", "B", "C", "D"]);
+  assert.deepStrictEqual(parsed.tasks, ["拖地", "厕所", "洗手台", "轮休"]);
+  const weekOne = rotaAssignments(parsed, new Date("2026-05-24T19:00:00"));
+  const weekTwo = rotaAssignments(parsed, new Date("2026-05-31T19:00:00"));
+  assert.deepStrictEqual(weekOne.map((item) => `${item.member}:${item.task}`), ["A:拖地", "B:厕所", "C:洗手台", "D:轮休"]);
+  assert.deepStrictEqual(weekTwo.map((item) => `${item.member}:${item.task}`), ["A:厕所", "B:洗手台", "C:轮休", "D:拖地"]);
+}
+
+function testRotaSchedulerParsesCurrentDutyAssignmentsAndMentions() {
+  const parsed = parseRotaRequest("整体的值日顺序是洗手台，拖地，厕所，轮休。这周是1234500006今天拖地，1234500001今天洗手台，1234500007今天厕所，1234500008今天轮休。每周按值日顺序，洗手台下周拖地，其余同理。每周天晚上7点@对应人做值日。", {
+    groupID: 987650002,
+    userID: 9,
+    startDate: "2026-05-24",
+    commandIntent: true
+  });
+  assert.ok(parsed);
+  assert.strictEqual(parsed.day_of_week, 0);
+  assert.strictEqual(parsed.time, "19:00");
+  assert.deepStrictEqual(parsed.tasks, ["洗手台", "拖地", "厕所", "轮休"]);
+  assert.deepStrictEqual(parsed.members, ["1234500001", "1234500006", "1234500007", "1234500008"]);
+  assert.deepStrictEqual(rotaAssignments(parsed, new Date("2026-05-24T19:00:00")).map((item) => `${item.member}:${item.task}`), [
+    "1234500001:洗手台",
+    "1234500006:拖地",
+    "1234500007:厕所",
+    "1234500008:轮休"
+  ]);
+  assert.deepStrictEqual(rotaAssignments(parsed, new Date("2026-05-31T19:00:00")).map((item) => `${item.member}:${item.task}`), [
+    "1234500001:拖地",
+    "1234500006:厕所",
+    "1234500007:轮休",
+    "1234500008:洗手台"
+  ]);
+  assert.match(previewRota(parsed), /下周：洗手台->1234500008，拖地->1234500001，厕所->1234500006，轮休->1234500007/);
+  const segments = formatRotaMessageSegments(parsed, new Date("2026-05-24T19:00:00"));
+  assert.ok(segments.some((seg) => seg.type === "at" && seg.data.qq === "1234500001"));
+  assert.ok(segments.some((seg) => seg.type === "at" && seg.data.qq === "1234500006"));
+}
+
+function testRotaCommandCreatesListsAndDeletesCurrentWorkspaceOnly() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-rota-command-"));
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-rota-command-other-"));
+  const replies = [];
+  try {
+    const commands = createProxyCommands(baseCommandDeps({
+      replies,
+      workspaceForGroup: (groupID) => Number(groupID) === 1 ? temp : other,
+      adminUsers: [9],
+    }));
+    commands.handleProxyCommand({ message_type: "group", group_id: 1, user_id: 9, message_id: 2, raw_message: "/提醒 每周日晚上7点 A、B、C、D 分别干拖地，厕所，洗手台，轮休" });
+    assert.match(replies.at(-1), /已创建群轮值提醒/);
+    commands.handleProxyCommand({ message_type: "group", group_id: 1, user_id: 9, message_id: 3, raw_message: "/提醒 列表" });
+    assert.match(replies.at(-1), /拖地、厕所、洗手台、轮休/);
+    commands.handleProxyCommand({ message_type: "group", group_id: 2, user_id: 9, message_id: 4, raw_message: "/提醒 列表" });
+    assert.strictEqual(replies.at(-1), "暂无群轮值提醒。");
+    commands.handleProxyCommand({ message_type: "group", group_id: 1, user_id: 9, message_id: 5, raw_message: "/提醒 删除 1" });
+    assert.match(replies.at(-1), /已删除群轮值提醒/);
+    assert.strictEqual(formatRotas(dueRotas(temp, new Date("2026-05-24T19:00:00"))), "暂无群轮值提醒。");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+    fs.rmSync(other, { recursive: true, force: true });
+  }
+}
+
+function testRotaFallbackToModelParseWhenRegexFails() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-rota-fallback-"));
+  const text = "整体值日顺序：洗手台、拖地、厕所、轮休。本周：1234500001 洗手台，1234500006 拖地，1234500007 厕所，1234500008 轮休。每周日晚上7点提醒并@对应人；每周每人顺到下一个值日项";
+  try {
+    assert.strictEqual(parseRotaRequest(text, { groupID: 1, userID: 9, commandIntent: true }), null);
+    const result = createRotaFromText(temp, text, {
+      groupID: 1,
+      userID: 9,
+      commandIntent: true,
+      startDate: "2026-05-24",
+    });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.source, "model");
+    assert.deepStrictEqual(rotaAssignments(result.item, new Date("2026-05-24T19:00:00")).map((item) => `${item.member}:${item.task}`), [
+      "1234500001:洗手台",
+      "1234500006:拖地",
+      "1234500007:厕所",
+      "1234500008:轮休"
+    ]);
+    assert.match(result.preview, /下周：洗手台->1234500008，拖地->1234500001，厕所->1234500006，轮休->1234500007/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testRotaModelSpecCreatesExpectedAssignments() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-rota-spec-"));
+  try {
+    const result = createRotaFromSpec(temp, {
+      task_type: "weekly_rota",
+      title: "值日提醒",
+      day_of_week: 0,
+      time: "19:00",
+      tasks: ["洗手台", "拖地", "厕所", "轮休"],
+      current_assignments: {
+        "1234500001": "洗手台",
+        "1234500006": "拖地",
+        "1234500007": "厕所",
+        "1234500008": "轮休"
+      },
+      rotation: { direction: "next_task", shift_per_run: 1 },
+      notify: { mention_assignees: true }
+    }, { groupID: 1, userID: 9, startDate: "2026-05-24" });
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.item.members, ["1234500001", "1234500006", "1234500007", "1234500008"]);
+    assert.match(previewRota(result.item), /本周：洗手台->1234500001/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testRotaCommandAndAtMentionBothUseFallback() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-rota-command-fallback-"));
+  const replies = [];
+  const text = "整体值日顺序：洗手台、拖地、厕所、轮休。本周：1234500001 洗手台，1234500006 拖地，1234500007 厕所，1234500008 轮休。每周日晚上7点提醒并@对应人；每周每人顺到下一个值日项";
+  try {
+    const commands = createProxyCommands(baseCommandDeps({
+      replies,
+      workspaceForGroup: () => temp,
+    }));
+    commands.handleProxyCommand({ message_type: "group", group_id: 1, user_id: 9, message_id: 2, raw_message: `/提醒 ${text}` });
+    assert.match(replies.at(-1), /已创建群轮值提醒/);
+    assert.match(replies.at(-1), /本周：洗手台->1234500001/);
+    assert.strictEqual(isRotaIntent({
+      post_type: "message",
+      message_type: "group",
+      group_id: 1,
+      user_id: 9,
+      self_id: 3209859433,
+      message_id: 3,
+      raw_message: `[CQ:at,qq=3209859433] ${text}`,
+      message: [{ type: "at", data: { qq: "3209859433" } }, { type: "text", data: { text } }]
+    }), true);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testMissingRotaFieldsAskOneQuestion() {
+  const result = tryParseRotaWithFallback("每周日提醒值日", { groupID: 1, userID: 9, commandIntent: true });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, "missing_fields");
+  const text = formatRotaFallbackFailure(result, "fallback");
+  assert.match(text, /还缺：提醒时间|还缺：值日顺序|还缺：本周每个人对应的任务/);
+  assert.doesNotMatch(text, /用法/);
+}
+
+function testMissingRotaFieldsPersistFollowupAndCreate() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-rota-followup-"));
+  try {
+    const parsed = tryParseRotaWithFallback("每周日提醒值日", {
+      groupID: 1,
+      userID: 9,
+      commandIntent: true,
+      startDate: "2026-05-24",
+    });
+    assert.strictEqual(parsed.reason, "missing_fields");
+    const pending = startPendingRotaTask(temp, parsed, {
+      groupID: 1,
+      userID: 9,
+      sourceText: "每周日提醒值日",
+    });
+    assert.match(pending.reply, /QQ号 任务/);
+    assert.ok(fs.existsSync(pendingRotaFile(temp)));
+
+    let next = continuePendingRotaTask(temp, "1234500001 洗手台，1234500006 拖地。晚上7点", {
+      groupID: 1,
+      userID: 9,
+    });
+    assert.strictEqual(next.handled, true);
+    assert.strictEqual(next.ok, true);
+    assert.match(next.reply, /已创建群轮值提醒/);
+    assert.deepStrictEqual(rotaAssignments(next.item, new Date("2026-05-24T19:00:00")).map((item) => `${item.member}:${item.task}`), [
+      "1234500001:洗手台",
+      "1234500006:拖地"
+    ]);
+    assert.strictEqual(fs.existsSync(pendingRotaFile(temp)), false);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testRotaCommandMissingFieldsStartsFollowup() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-rota-command-followup-"));
+  const replies = [];
+  try {
+    const commands = createProxyCommands(baseCommandDeps({
+      replies,
+      workspaceForGroup: () => temp,
+    }));
+    commands.handleProxyCommand({ message_type: "group", group_id: 1, user_id: 9, message_id: 2, raw_message: "/提醒 每周日提醒值日" });
+    assert.match(replies.at(-1), /QQ号 任务/);
+    assert.ok(fs.existsSync(pendingRotaFile(temp)));
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testDuplicateRotaIsDetected() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-rota-duplicate-"));
+  const spec = {
+    day_of_week: 0,
+    time: "19:00",
+    tasks: ["洗手台", "拖地"],
+    current_assignments: { "1234500001": "洗手台", "1234500006": "拖地" }
+  };
+  try {
+    assert.strictEqual(createRotaFromSpec(temp, spec, { groupID: 1, userID: 9, startDate: "2026-05-24" }).ok, true);
+    const duplicate = createRotaFromSpec(temp, spec, { groupID: 1, userID: 9, startDate: "2026-05-24" });
+    assert.strictEqual(duplicate.ok, false);
+    assert.strictEqual(duplicate.reason, "duplicate");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testTaskIntentRouterClassifiesNaturalLanguage() {
+  assert.strictEqual(classifyTask("帮我把这个文件改成只读再发回来").task_type, "file_modify_and_return");
+  assert.strictEqual(classifyTask("每天晚上 9 点提醒我检查余额").task_type, "scheduled_reminder");
+  assert.strictEqual(classifyTask("整体值日顺序：洗手台、拖地。本周：1234500001 洗手台，1234500006 拖地。每周日晚上7点提醒").task_type, "weekly_rota");
+  assert.strictEqual(classifyTask("写一个 python 脚本统计消息数量并运行").task_type, "script_create_and_run");
+  assert.strictEqual(classifyTask("重启 qq bot 服务让配置生效").task_type, "deploy_or_restart");
+  assert.strictEqual(classifyTask("今天吃什么").kind, "chat");
+}
+
+function testTaskAgentSchemaValidationHandlesNestedModelJSON() {
+  const parsed = normalizeModelResult({
+    content: [
+      "模型解析结果：",
+      "```json",
+      JSON.stringify({
+        task_type: "scheduled_reminder",
+        title: "检查余额提醒",
+        schedule: { type: "daily", time: "21:00", timezone: "Asia/Shanghai" },
+        message: "检查余额",
+        notify: { mention_user: "1234500001" },
+      }),
+      "```",
+    ].join("\n"),
+  }, "scheduled_reminder");
+  assert.strictEqual(parsed.ok, true);
+  assert.deepStrictEqual(parsed.missing, []);
+  assert.strictEqual(parsed.spec.schedule.time, "21:00");
+
+  const missing = normalizeModelResult({
+    task_type: "scheduled_reminder",
+    schedule: { type: "daily", time: null, timezone: "Asia/Shanghai" },
+    message: "检查余额",
+  }, "scheduled_reminder");
+  assert.strictEqual(missing.ok, true);
+  assert.deepStrictEqual(missing.missing, ["schedule.time"]);
+
+  const invalid = normalizeModelResult({
+    task_type: "scheduled_reminder",
+    schedule: { type: "hourly", time: "25:99" },
+    message: "检查余额",
+  }, "scheduled_reminder");
+  assert.strictEqual(invalid.ok, false);
+  assert.strictEqual(invalid.error, "schema_invalid");
+  assert.ok(invalid.errors.some((item) => item.field === "schedule.type"));
+  assert.ok(invalid.errors.some((item) => item.field === "schedule.time"));
+
+  const rota = validateTaskSpec({
+    task_type: "weekly_rota",
+    day_of_week: 0,
+    time: "19:00",
+    tasks: ["洗手台"],
+    current_assignments: { "1234500001": "洗手台" },
+  }, "weekly_rota");
+  assert.strictEqual(rota.ok, false);
+  assert.ok(rota.missing.includes("tasks"));
+  assert.ok(rota.missing.includes("current_assignments"));
+}
+
+function testTaskAgentBuildsSchemaPromptForModelParser() {
+  const request = buildTaskParseRequest("每天晚上 9 点提醒我检查余额", "scheduled_reminder", {
+    scope: "private",
+    scopeID: 1234500001,
+    userID: 1234500001,
+    today: "2026-05-24",
+  });
+  assert.strictEqual(request.role, "task_structure_parser");
+  assert.strictEqual(request.task_type, "scheduled_reminder");
+  assert.strictEqual(request.context.timezone, "Asia/Shanghai");
+  assert.ok(request.schema.required.includes("schedule.time"));
+  assert.strictEqual(request.schema.fields["schedule.type"].enum.includes("daily"), true);
+  assert.match(request.prompt, /只输出一个 JSON object/);
+  assert.match(request.prompt, /schedule\.time/);
+
+  let captured = null;
+  const parsed = parseTaskWithModel("每天晚上 9 点提醒我检查余额", "scheduled_reminder", {
+    userID: 1234500001,
+    modelParser: (payload) => {
+      captured = payload;
+      return {
+        task_type: "scheduled_reminder",
+        title: "检查余额提醒",
+        schedule: { type: "daily", time: "21:00", timezone: "Asia/Shanghai" },
+        message: "检查余额",
+        notify: { mention_user: "1234500001" },
+      };
+    },
+  });
+  assert.strictEqual(parsed.ok, true);
+  assert.strictEqual(captured.role, "task_structure_parser");
+  assert.strictEqual(captured.message, "每天晚上 9 点提醒我检查余额");
+}
+
+function testTaskAgentOptionalCommandParserUsesRequestJSON() {
+  const script = [
+    "let input='';",
+    "process.stdin.on('data', c => input += c);",
+    "process.stdin.on('end', () => {",
+    "  const req = JSON.parse(input);",
+    "  if (req.role !== 'task_structure_parser' || !req.prompt.includes('schedule.time')) process.exit(2);",
+    "  process.stdout.write(JSON.stringify({",
+    "    task_type: req.task_type,",
+    "    title: '检查余额提醒',",
+    "    schedule: { type: 'daily', time: '21:00', timezone: 'Asia/Shanghai' },",
+    "    message: '检查余额',",
+    "    notify: { mention_user: String(req.context.userID || '') }",
+    "  }));",
+    "});",
+  ].join("");
+  const parsed = parseTaskWithModel("每天晚上 9 点提醒我检查余额", "scheduled_reminder", {
+    userID: 1234500001,
+    modelParserCommand: { file: process.execPath, args: ["-e", script] },
+  });
+  assert.strictEqual(parsed.ok, true);
+  assert.strictEqual(parsed.spec.schedule.time, "21:00");
+  assert.strictEqual(parsed.spec.notify.mention_user, "1234500001");
+
+  const failed = parseTaskWithModel("每天晚上 9 点提醒我检查余额", "scheduled_reminder", {
+    modelParserCommand: { file: process.execPath, args: ["-e", "process.exit(7)"] },
+  });
+  assert.strictEqual(failed.ok, false);
+  assert.strictEqual(failed.error, "model_command_failed");
+}
+
+function testNaturalTaskPipelinePassesModelParserCommandOptions() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "nl-pipeline-model-parser-"));
+  try {
+    const script = [
+      "let input='';",
+      "process.stdin.on('data', c => input += c);",
+      "process.stdin.on('end', () => {",
+      "  const req = JSON.parse(input);",
+      "  if (req.role !== 'task_structure_parser') process.exit(2);",
+      "  if (req.context.timezone !== 'Asia/Shanghai' || req.context.today !== '2026-05-25') process.exit(3);",
+      "  if (String(req.context.userID) !== '1234500001' || !req.message.includes('解析桥接')) process.exit(4);",
+      "  process.stdout.write(JSON.stringify({",
+      "    task_type: 'scheduled_reminder',",
+      "    schedule: { type: 'daily', time: '08:15', timezone: req.context.timezone },",
+      "    message: '检查解析桥接',",
+      "    notify: { mention_user: String(req.context.userID) }",
+      "  }));",
+      "});",
+    ].join("");
+    const result = executeNaturalTask({
+      text: "提醒我检查解析桥接",
+      msg: { message_id: 45 },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1234500001, userID: 1234500001 },
+      options: {
+        modelParserCommand: { file: process.execPath, args: ["-e", script] },
+        modelParserTimeoutMs: 3000,
+        timezone: "Asia/Shanghai",
+        today: "2026-05-25",
+      },
+    });
+    assert.strictEqual(result.handled, true);
+    assert.strictEqual(result.ok, true);
+    const task = listTaskRequests({ workspace: temp }).find((item) => item.message_id === "45");
+    assert.strictEqual(task.status, "done");
+    assert.strictEqual(task.spec.schedule.time, "08:15");
+    assert.strictEqual(task.spec.notify.mention_user, "1234500001");
+    assert.strictEqual(readTaskReceipt({ workspace: temp, id: task.id }).status, "done");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testNaturalTaskPipelineUsesRegistryAndRejectsUnsupportedExecutors() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-pipeline-"));
+  try {
+    assert.deepStrictEqual(registeredTaskTypes(), ["deploy_or_restart", "scheduled_reminder", "weekly_rota"]);
+    const ignored = executeNaturalTask({
+      text: "今天吃什么",
+      workspace: temp,
+      context: { scope: "private", scopeID: 1, userID: 1 },
+    });
+    assert.strictEqual(ignored.handled, false);
+
+    const unsupported = executeNaturalTask({
+      text: "帮我把这个文件改成只读再发回来",
+      msg: { message_id: 33 },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1, userID: 1 },
+    });
+    assert.strictEqual(unsupported.handled, true);
+    assert.strictEqual(unsupported.reason, "missing_fields");
+    assert.match(unsupported.reply, /还缺源文件/);
+    assert.match(unsupported.task_request.id, /^task_/);
+    assert.strictEqual(listTaskRequests({ workspace: temp })[0].status, "awaiting_input");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testNaturalTaskMissingFieldsAskOneQuestionBeforeDelegation() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-missing-fields-"));
+  try {
+    const fileTask = executeNaturalTask({
+      text: "帮我把这个文件改成只读再发回来",
+      msg: { message_id: 34 },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1234500001, userID: 1234500001 },
+    });
+    assert.strictEqual(fileTask.handled, true);
+    assert.strictEqual(fileTask.reason, "missing_fields");
+    assert.match(fileTask.reply, /请上传文件|local_files/);
+    assert.strictEqual(readTaskReceipt({ workspace: temp, id: fileTask.task_request.id }).status, "awaiting_input");
+
+    const reminderTask = executeNaturalTask({
+      text: "提醒我检查余额",
+      msg: { message_id: 35 },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1234500001, userID: 1234500001 },
+    });
+    assert.strictEqual(reminderTask.handled, true);
+    assert.strictEqual(reminderTask.reason, "missing_fields");
+    assert.match(reminderTask.reply, /还缺提醒时间|几点/);
+    assert.strictEqual(listTaskRequests({ workspace: temp }).find((item) => item.message_id === "35").status, "awaiting_input");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testAwaitingInputContinuationMergesSupplementIntoOriginalTask() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "awaiting-continuation-"));
+  try {
+    const first = executeNaturalTask({
+      text: "帮我把这个文件改成只读再发回来",
+      msg: { message_id: 36 },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1234500001, userID: 1234500001 },
+    });
+    assert.strictEqual(first.reason, "missing_fields");
+    assert.strictEqual(findAwaitingInputTask({ workspace: temp, scope: "private", scopeID: 1234500001, userID: 1234500001 }).id, first.task_request.id);
+    const msg = {
+      post_type: "message",
+      message_type: "private",
+      user_id: 1234500001,
+      message_id: 37,
+      raw_message: "local_files/archive/2026-05-24/demo.ps1",
+    };
+    const continuation = awaitingNaturalTaskContinuation(msg, {
+      workspace: temp,
+      text: msg.raw_message,
+      isPrivate: true,
+    });
+    assert.match(continuation.combinedText, /补充：local_files\/archive/);
+    const next = executeNaturalTask({
+      text: continuation.combinedText,
+      msg: { ...msg, message_id: continuation.pending.message_id },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1234500001, userID: 1234500001 },
+    });
+    assert.strictEqual(next.delegate_to_agent, true);
+    const task = listTaskRequests({ workspace: temp })[0];
+    assert.strictEqual(task.id, first.task_request.id);
+    assert.strictEqual(task.status, "delegated");
+    assert.strictEqual(task.spec.source_file, "local_files/archive/2026-05-24/demo.ps1");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testExplicitTaskContinueCommandBuildsOriginalTaskSupplement() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-explicit-continue-"));
+  try {
+    const task = createTaskRequest({
+      workspace: temp,
+      scope: "private",
+      scopeID: 1234500001,
+      userID: 1234500001,
+      messageID: 38,
+      taskType: "file_modify_and_return",
+      confidence: 0.74,
+      text: "帮我把这个文件改成只读再发回来",
+      status: "awaiting_input",
+    });
+    assert.deepStrictEqual(parseTaskContinueCommand(`/任务 继续 ${task.id.slice(-8)} local_files/archive/demo.ps1`), {
+      id: task.id.slice(-8),
+      supplement: "local_files/archive/demo.ps1",
+    });
+    const denied = taskContinueRequestForMessage({
+      post_type: "message",
+      message_type: "private",
+      user_id: 42,
+      message_id: 39,
+      raw_message: `/任务 继续 ${task.id} local_files/archive/demo.ps1`,
+    }, { workspace: temp });
+    assert.strictEqual(denied.handled, true);
+    assert.strictEqual(denied.ok, false);
+    assert.strictEqual(denied.reply, "没有权限。");
+
+    const accepted = taskContinueRequestForMessage({
+      post_type: "message",
+      message_type: "private",
+      user_id: 1234500001,
+      message_id: 40,
+      raw_message: `/任务 继续 ${task.id.slice(-8)} local_files/archive/demo.ps1`,
+    }, { workspace: temp });
+    assert.strictEqual(accepted.ok, true);
+    assert.strictEqual(accepted.task.id, task.id);
+    assert.match(accepted.combinedText, /帮我把这个文件改成只读/);
+    assert.match(accepted.combinedText, /补充：local_files\/archive\/demo\.ps1/);
+
+    updateTaskRequest({ workspace: temp, id: task.id, status: "cancelled" });
+    const closed = taskContinueRequestForMessage({
+      post_type: "message",
+      message_type: "private",
+      user_id: 1234500001,
+      message_id: 41,
+      raw_message: `/任务 继续 ${task.id} local_files/archive/demo.ps1`,
+    }, { workspace: temp });
+    assert.match(closed.reply, /不能继续补充/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testDeployRestartNaturalTaskRequiresConfirmation() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-deploy-confirm-"));
+  try {
+    const result = executeNaturalTask({
+      text: "重启 qq bot 服务让配置生效",
+      msg: { message_id: 45 },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1234500001, userID: 1234500001 },
+    });
+    assert.strictEqual(result.handled, true);
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.status, "awaiting_confirmation");
+    assert.match(result.reply, /尚未执行/);
+    assert.match(result.reply, new RegExp(result.task_request.id));
+    const tasks = listTaskRequests({ workspace: temp });
+    assert.strictEqual(tasks.length, 1);
+    assert.strictEqual(tasks[0].status, "awaiting_confirmation");
+    assert.strictEqual(tasks[0].task_type, "deploy_or_restart");
+    const receipt = readTaskReceipt({ workspace: temp, id: tasks[0].id });
+    assert.strictEqual(receipt.status, "awaiting_confirmation");
+    assert.strictEqual(receipt.checks[0].name, "confirmation_gate");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testTaskRequestStoreDedupesAndTracksUpdates() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-request-store-"));
+  try {
+    const first = createTaskRequest({
+      workspace: temp,
+      scope: "private",
+      scopeID: 1234500001,
+      userID: 1234500001,
+      messageID: 9,
+      taskType: "file_modify_and_return",
+      confidence: 0.8,
+      text: "帮我改文件",
+      status: "delegated",
+    });
+    const second = createTaskRequest({
+      workspace: temp,
+      scope: "private",
+      scopeID: 1234500001,
+      userID: 1234500001,
+      messageID: 9,
+      taskType: "file_modify_and_return",
+      confidence: 0.8,
+      text: "帮我改文件",
+      status: "delegated",
+    });
+    assert.strictEqual(first.id, second.id);
+    assert.strictEqual(first.receipt_path, taskReceiptPath(first.id));
+    assert.ok(fs.existsSync(taskRequestFile(temp)));
+    updateTaskRequest({ workspace: temp, id: first.id, status: "done", result: { ok: true } });
+    writeTaskReceipt({
+      workspace: temp,
+      id: first.id,
+      receipt: {
+        status: "done",
+        result: { ok: true },
+        artifacts: ["local_files/modified/demo.ps1"],
+        checks: [{ name: "syntax", status: "passed" }],
+      },
+    });
+    const tasks = listTaskRequests({ workspace: temp });
+    assert.strictEqual(tasks.length, 1);
+    assert.strictEqual(tasks[0].status, "done");
+    assert.deepStrictEqual(tasks[0].result, { ok: true });
+    assert.strictEqual(readTaskReceipt({ workspace: temp, id: first.id }).status, "done");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testTaskCommandListsAndShowsWorkspaceTasks() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-command-"));
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), "task-command-other-"));
+  const replies = [];
+  try {
+    const task = createTaskRequest({
+      workspace: temp,
+      scope: "group",
+      scopeID: 987650002,
+      userID: 1234500001,
+      messageID: 12,
+      taskType: "file_modify_and_return",
+      confidence: 0.74,
+      text: "帮我把刚才上传的脚本改好发回来",
+      status: "delegated",
+    });
+    writeTaskReceipt({
+      workspace: temp,
+      id: task.id,
+      receipt: {
+        status: "done",
+        result: { ok: true },
+        artifacts: ["local_files/modified/demo-modified.ps1"],
+        checks: [{ name: "syntax", status: "passed" }],
+      },
+    });
+    createTaskRequest({
+      workspace: other,
+      scope: "group",
+      scopeID: 999,
+      userID: 1,
+      messageID: 13,
+      taskType: "deploy_or_restart",
+      text: "重启服务",
+      status: "delegated",
+    });
+    const commands = createProxyCommands(baseCommandDeps({ replies, workspaceForGroup: () => temp }));
+    commands.handleProxyCommand({
+      post_type: "message",
+      message_type: "group",
+      group_id: 987650002,
+      user_id: 1234500001,
+      message_id: 1,
+      raw_message: "/任务",
+    });
+    assert.match(replies.at(-1), /最近自然语言任务/);
+    assert.match(replies.at(-1), /file_modify_and_return/);
+    assert.doesNotMatch(replies.at(-1), /deploy_or_restart/);
+    commands.handleProxyCommand({
+      post_type: "message",
+      message_type: "group",
+      group_id: 987650002,
+      user_id: 1234500001,
+      message_id: 2,
+      raw_message: `/任务 ${task.id.slice(-8)}`,
+    });
+    assert.match(replies.at(-1), /任务详情/);
+    assert.match(replies.at(-1), /local_files\/modified\/demo-modified\.ps1/);
+    assert.match(replies.at(-1), /syntax:passed/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+    fs.rmSync(other, { recursive: true, force: true });
+  }
+}
+
+function testTaskCommandFiltersAndShowsUploadReceiptStatus() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-command-filters-"));
+  const replies = [];
+  try {
+    const pending = createTaskRequest({
+      workspace: temp,
+      scope: "group",
+      scopeID: 987650002,
+      userID: 1234500001,
+      messageID: 18,
+      taskType: "file_modify_and_return",
+      text: "改文件",
+      status: "delegated",
+    });
+    const done = createTaskRequest({
+      workspace: temp,
+      scope: "group",
+      scopeID: 987650002,
+      userID: 1234500001,
+      messageID: 19,
+      taskType: "script_create_and_run",
+      text: "写脚本",
+      status: "done",
+    });
+    createTaskRequest({
+      workspace: temp,
+      scope: "group",
+      scopeID: 987650002,
+      userID: 1234500001,
+      messageID: 20,
+      taskType: "scheduled_reminder",
+      text: "坏提醒",
+      status: "failed",
+    });
+    createTaskRequest({
+      workspace: temp,
+      scope: "group",
+      scopeID: 987650002,
+      userID: 1234500001,
+      messageID: 21,
+      taskType: "deploy_or_restart",
+      text: "取消部署",
+      status: "cancelled",
+    });
+    writeTaskReceipt({
+      workspace: temp,
+      id: done.id,
+      receipt: {
+        status: "done",
+        result: { ok: true, upload_status: "passed", upload_detail: "message_id:77" },
+        artifacts: ["local_files/generated/stats.py"],
+        checks: [
+          { name: "syntax", status: "passed" },
+          { name: "file_outbox", status: "queued", detail: "group-file-outbox/task.json" },
+          { name: "file_upload", status: "passed", path: "local_files/generated/stats.py", target: "group:987650002" },
+        ],
+      },
+    });
+    const commands = createProxyCommands(baseCommandDeps({ replies, workspaceForGroup: () => temp }));
+    const msg = {
+      post_type: "message",
+      message_type: "group",
+      group_id: 987650002,
+      user_id: 1234500001,
+      message_id: 1,
+    };
+    commands.handleProxyCommand({ ...msg, raw_message: "/任务 pending" });
+    assert.match(replies.at(-1), /file_modify_and_return/);
+    assert.doesNotMatch(replies.at(-1), /script_create_and_run/);
+    commands.handleProxyCommand({ ...msg, raw_message: "/任务 done" });
+    assert.match(replies.at(-1), /script_create_and_run/);
+    assert.doesNotMatch(replies.at(-1), /file_modify_and_return/);
+    commands.handleProxyCommand({ ...msg, raw_message: "/任务 failed" });
+    assert.match(replies.at(-1), /scheduled_reminder/);
+    commands.handleProxyCommand({ ...msg, raw_message: "/任务 cancelled" });
+    assert.match(replies.at(-1), /deploy_or_restart/);
+    commands.handleProxyCommand({ ...msg, raw_message: `/任务 ${done.id.slice(-8)}` });
+    assert.match(replies.at(-1), /上传：passed message_id:77/);
+    assert.match(replies.at(-1), /上传记录：local_files\/generated\/stats\.py:passed/);
+    assert.ok(pending.id);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testTaskCommandConfirmsAndCancelsDeployRestartOnly() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-command-confirm-"));
+  const replies = [];
+  try {
+    const deploy = createTaskRequest({
+      workspace: temp,
+      scope: "group",
+      scopeID: 987650002,
+      userID: 1234500001,
+      messageID: 14,
+      taskType: "deploy_or_restart",
+      confidence: 0.66,
+      text: "重启 qq bot",
+      status: "awaiting_confirmation",
+    });
+    const fileTask = createTaskRequest({
+      workspace: temp,
+      scope: "group",
+      scopeID: 987650002,
+      userID: 1234500001,
+      messageID: 15,
+      taskType: "file_modify_and_return",
+      confidence: 0.74,
+      text: "改文件",
+      status: "delegated",
+    });
+    const commands = createProxyCommands(baseCommandDeps({ replies, workspaceForGroup: () => temp, adminUsers: [1234500001] }));
+    commands.handleProxyCommand({
+      post_type: "message",
+      message_type: "group",
+      group_id: 987650002,
+      user_id: 2,
+      message_id: 1,
+      raw_message: `/任务 确认 ${deploy.id}`,
+    });
+    assert.strictEqual(replies.at(-1), "没有权限。");
+    commands.handleProxyCommand({
+      post_type: "message",
+      message_type: "group",
+      group_id: 987650002,
+      user_id: 1234500001,
+      message_id: 2,
+      raw_message: `/任务 确认 ${fileTask.id}`,
+    });
+    assert.match(replies.at(-1), /不需要部署\/重启确认/);
+    commands.handleProxyCommand({
+      post_type: "message",
+      message_type: "group",
+      group_id: 987650002,
+      user_id: 1234500001,
+      message_id: 3,
+      raw_message: `/任务 确认 ${deploy.id.slice(-8)}`,
+    });
+    assert.match(replies.at(-1), /已确认任务/);
+    assert.match(replies.at(-1), /仍未自动部署或重启/);
+    const approved = listTaskRequests({ workspace: temp }).find((item) => item.id === deploy.id);
+    assert.strictEqual(approved.status, "approved");
+    assert.strictEqual(readTaskReceipt({ workspace: temp, id: deploy.id }).status, "approved");
+
+    const cancel = createTaskRequest({
+      workspace: temp,
+      scope: "group",
+      scopeID: 987650002,
+      userID: 1234500001,
+      messageID: 16,
+      taskType: "deploy_or_restart",
+      text: "部署 qq bot",
+      status: "awaiting_confirmation",
+    });
+    commands.handleProxyCommand({
+      post_type: "message",
+      message_type: "group",
+      group_id: 987650002,
+      user_id: 1234500001,
+      message_id: 4,
+      raw_message: `/任务 取消 ${cancel.id}`,
+    });
+    assert.match(replies.at(-1), /已取消任务/);
+    assert.strictEqual(listTaskRequests({ workspace: temp }).find((item) => item.id === cancel.id).status, "cancelled");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testTaskCommandCancelsAwaitingInputByOwnerOnly() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "command-cancel-awaiting-"));
+  const replies = [];
+  try {
+    const task = createTaskRequest({
+      workspace: temp,
+      scope: "private",
+      scopeID: 1234500001,
+      userID: 1234500001,
+      messageID: 17,
+      taskType: "file_modify_and_return",
+      confidence: 0.74,
+      text: "帮我改这个文件再发回来",
+      status: "awaiting_input",
+    });
+    const commands = createProxyCommands(baseCommandDeps({
+      replies,
+      workspaceForPrivateUser: () => temp,
+    }));
+
+    commands.handleProxyCommand({
+      post_type: "message",
+      message_type: "private",
+      user_id: 42,
+      message_id: 1,
+      raw_message: `/任务 取消 ${task.id}`,
+    });
+    assert.strictEqual(replies.at(-1), "没有权限。");
+    assert.strictEqual(listTaskRequests({ workspace: temp }).find((item) => item.id === task.id).status, "awaiting_input");
+
+    commands.handleProxyCommand({
+      post_type: "message",
+      message_type: "private",
+      user_id: 1234500001,
+      message_id: 2,
+      raw_message: `/任务 取消 ${task.id.slice(-8)}`,
+    });
+    assert.match(replies.at(-1), /已取消任务/);
+    assert.strictEqual(listTaskRequests({ workspace: temp }).find((item) => item.id === task.id).status, "cancelled");
+    assert.strictEqual(findAwaitingInputTask({
+      workspace: temp,
+      scope: "private",
+      scopeID: 1234500001,
+      userID: 1234500001,
+    }), null);
+    const receipt = readTaskReceipt({ workspace: temp, id: task.id });
+    assert.strictEqual(receipt.status, "cancelled");
+    assert.strictEqual(receipt.checks[0].name, "user_cancel");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testFileModifyTaskPreparationPicksRecentWorkspaceFile() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "file-task-prep-"));
+  try {
+    addFileIndex({
+      workspace: temp,
+      scope: "private",
+      scopeID: "1234500001",
+      userID: "1234500001",
+      name: "demo.ps1",
+      originalName: "demo.ps1",
+      relativePath: "local_files/archive/2026-05-24/demo.ps1",
+      size: 100,
+      parser: "none",
+    });
+    const prepared = prepareFileModifyTask({
+      workspace: temp,
+      spec: {
+        task_type: "file_modify_and_return",
+        source_file: null,
+        instructions: "改成只能读取 localhost 和本地文件",
+        output_path: null,
+        checks: [],
+      },
+      text: "帮我把刚才上传的脚本改好发回来",
+    });
+    assert.strictEqual(prepared.ok, true);
+    assert.strictEqual(prepared.spec.source_file, "local_files/archive/2026-05-24/demo.ps1");
+    assert.strictEqual(prepared.spec.output_path, "local_files/modified/demo-modified.ps1");
+    assert.deepStrictEqual(prepared.spec.checks, ["syntax"]);
+
+    const unsafe = prepareFileModifyTask({
+      workspace: temp,
+      spec: {
+        task_type: "file_modify_and_return",
+        source_file: "../secret.txt",
+        output_path: "../../bad.txt",
+      },
+      text: "",
+    });
+    assert.strictEqual(unsafe.ok, false);
+    assert.strictEqual(unsafe.errors[0].field, "source_file");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testDelegatedTaskStatusClosesFromAgentReply() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-reply-close-"));
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), "task-reply-runtime-"));
+  try {
+    const task = createTaskRequest({
+      workspace: temp,
+      scope: "private",
+      scopeID: 1234500001,
+      userID: 1234500001,
+      messageID: 77,
+      taskType: "file_modify_and_return",
+      confidence: 0.74,
+      text: "帮我改文件再发回来",
+      status: "delegated",
+    });
+    const pending = updateTaskRequestFromBotReply({
+      workspace: temp,
+      triggerMsg: { message_id: 77 },
+      text: "还缺源文件路径，请上传或指定 local_files/ 路径。",
+    });
+    assert.strictEqual(pending, null);
+    assert.strictEqual(listTaskRequests({ workspace: temp })[0].status, "delegated");
+    fs.mkdirSync(path.join(temp, "local_files", "modified"), { recursive: true });
+    fs.writeFileSync(path.join(temp, "local_files", "modified", "demo-modified.ps1"), "Write-Output ok\n", "utf8");
+    const closed = updateTaskRequestFromBotReply({
+      workspace: temp,
+      triggerMsg: { message_id: 77 },
+      text: "已修改并保存：local_files/modified/demo-modified.ps1，语法检查通过。",
+      runtimeDir: runtime,
+    });
+    assert.strictEqual(closed.status, "done");
+    const updated = listTaskRequests({ workspace: temp })[0];
+    assert.strictEqual(updated.id, task.id);
+    assert.strictEqual(updated.status, "done");
+    const receipt = readTaskReceipt({ workspace: temp, id: task.id });
+    assert.strictEqual(receipt.status, "done");
+    assert.deepStrictEqual(receipt.artifacts, ["local_files/modified/demo-modified.ps1"]);
+    assert.ok(receipt.checks.some((item) => item.name === "file_outbox" && item.status === "queued"));
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+    fs.rmSync(runtime, { recursive: true, force: true });
+  }
+}
+
+function testTaskArtifactUploadsWriteTargetedOutbox() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-artifact-outbox-"));
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), "task-artifact-runtime-"));
+  try {
+    fs.mkdirSync(path.join(temp, "local_files", "modified"), { recursive: true });
+    fs.writeFileSync(path.join(temp, "local_files", "modified", "demo-modified.ps1"), "Write-Output ok\n", "utf8");
+    const groupTask = createTaskRequest({
+      workspace: temp,
+      scope: "group",
+      scopeID: 987650002,
+      userID: 1234500001,
+      messageID: 78,
+      taskType: "file_modify_and_return",
+      text: "帮我改文件再发回来",
+      status: "delegated",
+    });
+    const rows = taskArtifactOutboxRows({
+      workspace: temp,
+      task: groupTask,
+      artifacts: ["local_files/modified/demo-modified.ps1"],
+    });
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].group_id, "987650002");
+    assert.strictEqual(rows[0].path, "local_files/modified/demo-modified.ps1");
+
+    const outbox = enqueueTaskArtifactUploads({
+      workspace: temp,
+      task: groupTask,
+      artifacts: ["local_files/modified/demo-modified.ps1"],
+      runtimeDir: runtime,
+    });
+    assert.strictEqual(outbox.check.status, "queued");
+    assert.match(outbox.relative_path, /^group-file-outbox\//);
+    const body = JSON.parse(fs.readFileSync(outbox.path, "utf8"));
+    assert.strictEqual(body.task_id, groupTask.id);
+    assert.strictEqual(body.files[0].group_id, "987650002");
+    assert.strictEqual(body.files[0].path, "local_files/modified/demo-modified.ps1");
+    const candidates = fileOutboxCandidates(outbox.path, { type: "group", id: 987650002 }, temp, temp, "group-file-outbox");
+    assert.strictEqual(candidates.length, 1);
+    assert.strictEqual(candidates[0].taskID, groupTask.id);
+    assert.strictEqual(candidates[0].relativePath, "local_files/modified/demo-modified.ps1");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+    fs.rmSync(runtime, { recursive: true, force: true });
+  }
+}
+
+function testTaskArtifactUploadResultUpdatesReceipt() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-upload-result-"));
+  try {
+    const task = createTaskRequest({
+      workspace: temp,
+      scope: "private",
+      scopeID: 1234500001,
+      userID: 1234500001,
+      messageID: 79,
+      taskType: "script_create_and_run",
+      text: "写脚本",
+      status: "done",
+    });
+    writeTaskReceipt({
+      workspace: temp,
+      id: task.id,
+      receipt: {
+        status: "done",
+        result: { ok: true },
+        artifacts: ["local_files/generated/stats.py"],
+        checks: [{ name: "file_outbox", status: "queued" }],
+      },
+    });
+    const updated = recordTaskArtifactUploadResult({
+      workspace: temp,
+      info: {
+        target: { type: "private", id: 1234500001 },
+        taskID: task.id,
+        relativePath: "local_files/generated/stats.py",
+        name: "stats.py",
+      },
+      status: "passed",
+      detail: "message_id:123",
+    });
+    assert.strictEqual(updated.result.upload_status, "passed");
+    assert.ok(updated.checks.some((item) => item.name === "file_upload" && item.status === "passed" && item.path === "local_files/generated/stats.py"));
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testFileTaskReplyRequiresExistingModifiedArtifact() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-reply-artifact-"));
+  try {
+    assert.deepStrictEqual(
+      extractTaskArtifactPaths("已保存：local_files/modified/demo-modified.ps1。"),
+      ["local_files/modified/demo-modified.ps1"]
+    );
+    assert.strictEqual(validateTaskArtifactPath({ workspace: temp, rawPath: "local_files/archive/demo.ps1", requireModified: true }).ok, false);
+    const task = createTaskRequest({
+      workspace: temp,
+      scope: "private",
+      scopeID: 1234500001,
+      userID: 1234500001,
+      messageID: 78,
+      taskType: "file_modify_and_return",
+      confidence: 0.74,
+      text: "帮我改文件再发回来",
+      status: "delegated",
+    });
+    const missing = updateTaskRequestFromBotReply({
+      workspace: temp,
+      triggerMsg: { message_id: 78 },
+      text: "已修改并保存：local_files/modified/missing.ps1",
+    });
+    assert.strictEqual(missing.status, "failed");
+    assert.strictEqual(listTaskRequests({ workspace: temp })[0].status, "failed");
+    assert.strictEqual(readTaskReceipt({ workspace: temp, id: task.id }).result.reason, "missing");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testTaskAgentContextEnrichesDelegatedNaturalTasks() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-agent-context-"));
+  const msg = {
+    post_type: "message",
+    message_type: "private",
+    user_id: 1234500001,
+    message_id: 2,
+    __task_workspace: temp,
+    raw_message: "帮我把 received_files/demo.ps1 改成只能读取 localhost 和本地文件，改好发回来",
+  };
+  try {
+    const context = taskAgentContextForMessage(msg);
+    assert.match(context, /自然语言任务代理/);
+    assert.match(context, /task_type: file_modify_and_return/);
+    assert.match(context, /task_id: task_/);
+    assert.match(context, /receipt_path: memory\/task-results\/task_/);
+    assert.match(context, /local_files\//);
+    assert.match(context, /received_files\/demo\.ps1/);
+    const tasks = listTaskRequests({ workspace: temp });
+    assert.strictEqual(tasks.length, 1);
+    assert.strictEqual(tasks[0].status, "delegated");
+    const enriched = enrichMessageForAgent(msg);
+    assert.match(enriched.raw_message, /自然语言任务代理/);
+    assert.match(enriched.raw_message, /不要只回复用法或建议/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testTaskAgentContextStoresPreparedFileSpecFromRecentFile() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-context-file-prep-"));
+  try {
+    addFileIndex({
+      workspace: temp,
+      scope: "group",
+      scopeID: "987650002",
+      userID: "1234500001",
+      name: "report.md",
+      originalName: "report.md",
+      relativePath: "local_files/archive/2026-05-24/report.md",
+      size: 120,
+      parser: "text",
+    });
+    const msg = {
+      post_type: "message",
+      message_type: "group",
+      group_id: 987650002,
+      user_id: 1234500001,
+      message_id: 90,
+      __task_workspace: temp,
+      raw_message: "帮我把刚才上传的文件润色一下发回来",
+    };
+    const context = taskAgentContextForMessage(msg);
+    assert.match(context, /已解析输入：local_files\/archive\/2026-05-24\/report\.md/);
+    assert.match(context, /建议输出：local_files\/modified\/report-modified\.md/);
+    const task = listTaskRequests({ workspace: temp })[0];
+    assert.strictEqual(task.spec.source_file, "local_files/archive/2026-05-24/report.md");
+    assert.strictEqual(task.spec.output_path, "local_files/modified/report-modified.md");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testDelegatedFilePipelineStoresPreparedSpecBeforeAgentDispatch() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-pipeline-file-prep-"));
+  try {
+    addFileIndex({
+      workspace: temp,
+      scope: "private",
+      scopeID: "1234500001",
+      userID: "1234500001",
+      name: "script.py",
+      originalName: "script.py",
+      relativePath: "local_files/archive/2026-05-24/script.py",
+      size: 120,
+      parser: "text",
+    });
+    const result = executeNaturalTask({
+      text: "帮我把刚才上传的脚本改好发回来",
+      msg: { message_id: 91 },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1234500001, userID: 1234500001 },
+    });
+    assert.strictEqual(result.handled, false);
+    assert.strictEqual(result.delegate_to_agent, true);
+    assert.strictEqual(result.task_request.spec.source_file, "local_files/archive/2026-05-24/script.py");
+    assert.strictEqual(result.task_request.spec.output_path, "local_files/modified/script-modified.py");
+    assert.strictEqual(listTaskRequests({ workspace: temp })[0].spec.source_file, "local_files/archive/2026-05-24/script.py");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testFileModifyTaskCanRunConfiguredLocalModifier() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "file-local-modifier-"));
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), "file-local-runtime-"));
+  try {
+    fs.mkdirSync(path.join(temp, "local_files", "archive", "2026-05-25"), { recursive: true });
+    fs.writeFileSync(path.join(temp, "local_files", "archive", "2026-05-25", "demo.py"), "print('before')\n", "utf8");
+    addFileIndex({
+      workspace: temp,
+      scope: "private",
+      scopeID: "1234500001",
+      userID: "1234500001",
+      name: "demo.py",
+      originalName: "demo.py",
+      relativePath: "local_files/archive/2026-05-25/demo.py",
+      size: 16,
+      parser: "text",
+    });
+    const modifier = [
+      "let input='';",
+      "process.stdin.on('data', c => input += c);",
+      "process.stdin.on('end', () => {",
+      "  const req = JSON.parse(input);",
+      "  if (req.role !== 'file_modifier' || !req.source.content.includes('before')) process.exit(2);",
+      "  process.stdout.write(JSON.stringify({ content: \"print('after')\\n\" }));",
+      "});",
+    ].join("");
+    const result = executeNaturalTask({
+      text: "帮我把刚才上传的脚本改好发回来",
+      msg: { message_id: 97 },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1234500001, userID: 1234500001 },
+      options: {
+        fileModifierCommand: { file: process.execPath, args: ["-e", modifier] },
+        runtimeDir: runtime,
+      },
+    });
+    assert.strictEqual(result.handled, true);
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.artifacts, ["local_files/modified/demo-modified.py"]);
+    assert.strictEqual(fs.readFileSync(path.join(temp, "local_files", "modified", "demo-modified.py"), "utf8"), "print('after')\n");
+    const task = listTaskRequests({ workspace: temp }).find((item) => item.message_id === "97");
+    assert.strictEqual(task.status, "done");
+    const receipt = readTaskReceipt({ workspace: temp, id: task.id });
+    assert.strictEqual(receipt.status, "done");
+    assert.ok(receipt.checks.some((item) => item.name === "file_modify" && item.status === "passed"));
+    assert.ok(receipt.checks.some((item) => item.name === "syntax" && item.status === "passed"));
+    assert.ok(receipt.checks.some((item) => item.name === "file_outbox" && item.status === "queued"));
+    const outboxFiles = fs.readdirSync(path.join(runtime, "private-file-outbox")).filter((name) => name.endsWith(".json"));
+    assert.strictEqual(outboxFiles.length, 1);
+    const outbox = JSON.parse(fs.readFileSync(path.join(runtime, "private-file-outbox", outboxFiles[0]), "utf8"));
+    assert.strictEqual(outbox.task_id, task.id);
+    assert.strictEqual(outbox.files[0].path, "local_files/modified/demo-modified.py");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+    fs.rmSync(runtime, { recursive: true, force: true });
+  }
+}
+
+function testScriptCreateTaskPreparationUsesGeneratedWorkspacePath() {
+  const prepared = prepareScriptCreateTask({
+    spec: {
+      task_type: "script_create_and_run",
+      title: "统计消息数量",
+      description: "统计本周消息数量",
+      language: "python",
+      output_path: "scripts/weekly-stats.py",
+      run_after_create: true,
+      checks: [],
+    },
+    text: "写一个 python 脚本统计消息数量并运行",
+  });
+  assert.strictEqual(prepared.ok, true);
+  assert.strictEqual(prepared.spec.language, "python");
+  assert.strictEqual(prepared.spec.output_path, "local_files/generated/generated-task.py");
+  assert.deepStrictEqual(prepared.spec.checks, ["syntax", "dry_run"]);
+
+  const unsafe = prepareScriptCreateTask({
+    spec: {
+      task_type: "script_create_and_run",
+      language: "powershell",
+      output_path: "../bad.ps1",
+    },
+    text: "写 powershell 脚本",
+  });
+  assert.strictEqual(unsafe.ok, true);
+  assert.strictEqual(unsafe.spec.output_path, "local_files/generated/powershell.ps1");
+
+  const missing = prepareScriptCreateTask({
+    spec: { task_type: "script_create_and_run", language: null, output_path: null },
+    text: "写个脚本",
+  });
+  assert.strictEqual(missing.ok, false);
+  assert.strictEqual(missing.errors[0].field, "language");
+}
+
+function testScriptCreateContextAndPipelineStorePreparedSpec() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-script-prep-"));
+  try {
+    const msg = {
+      post_type: "message",
+      message_type: "private",
+      user_id: 1234500001,
+      message_id: 92,
+      __task_workspace: temp,
+      raw_message: "写一个 python 脚本统计消息数量并运行",
+    };
+    const context = taskAgentContextForMessage(msg);
+    assert.match(context, /脚本任务规则/);
+    assert.match(context, /建议语言：python/);
+    assert.match(context, /local_files\/generated\/generated-task\.py/);
+    let task = listTaskRequests({ workspace: temp })[0];
+    assert.strictEqual(task.spec.language, "python");
+    assert.strictEqual(task.spec.output_path, "local_files/generated/generated-task.py");
+
+    const result = executeNaturalTask({
+      text: "写一个 python 脚本统计消息数量并运行",
+      msg: { message_id: 93 },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1234500001, userID: 1234500001 },
+    });
+    assert.strictEqual(result.handled, false);
+    assert.strictEqual(result.delegate_to_agent, true);
+    assert.strictEqual(result.task_request.spec.output_path, "local_files/generated/generated-task.py");
+    task = listTaskRequests({ workspace: temp }).find((item) => item.message_id === "93");
+    assert.strictEqual(task.spec.output_path, "local_files/generated/generated-task.py");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testScriptCreateTaskCanRunConfiguredLocalGenerator() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "script-local-generator-"));
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), "script-local-runtime-"));
+  try {
+    assert.strictEqual(extractGeneratedScript("```python\nprint('ok')\n```"), "print('ok')\n");
+    const generator = [
+      "let input='';",
+      "process.stdin.on('data', c => input += c);",
+      "process.stdin.on('end', () => {",
+      "  const req = JSON.parse(input);",
+      "  if (req.role !== 'script_generator' || req.spec.language !== 'python') process.exit(2);",
+      "  process.stdout.write(JSON.stringify({ code: \"print('ok')\\n\" }));",
+      "});",
+    ].join("");
+    const result = executeNaturalTask({
+      text: "写一个 python 脚本统计消息数量并运行",
+      msg: { message_id: 96 },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1234500001, userID: 1234500001 },
+      options: {
+        scriptGeneratorCommand: { file: process.execPath, args: ["-e", generator] },
+        runtimeDir: runtime,
+      },
+    });
+    assert.strictEqual(result.handled, true);
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.artifacts, ["local_files/generated/generated-task.py"]);
+    assert.ok(fs.existsSync(path.join(temp, "local_files", "generated", "generated-task.py")));
+    const task = listTaskRequests({ workspace: temp }).find((item) => item.message_id === "96");
+    assert.strictEqual(task.status, "done");
+    const receipt = readTaskReceipt({ workspace: temp, id: task.id });
+    assert.strictEqual(receipt.status, "done");
+    assert.deepStrictEqual(receipt.artifacts, ["local_files/generated/generated-task.py"]);
+    assert.ok(receipt.checks.some((item) => item.name === "script_generate" && item.status === "passed"));
+    assert.ok(receipt.checks.some((item) => item.name === "syntax" && item.status === "passed"));
+    assert.ok(receipt.checks.some((item) => item.name === "dry_run" && item.status === "passed"));
+    assert.ok(receipt.checks.some((item) => item.name === "file_outbox" && item.status === "queued"));
+    const outboxFiles = fs.readdirSync(path.join(runtime, "private-file-outbox")).filter((name) => name.endsWith(".json"));
+    assert.strictEqual(outboxFiles.length, 1);
+    const outbox = JSON.parse(fs.readFileSync(path.join(runtime, "private-file-outbox", outboxFiles[0]), "utf8"));
+    assert.strictEqual(outbox.task_id, task.id);
+    assert.strictEqual(outbox.files[0].path, "local_files/generated/generated-task.py");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+    fs.rmSync(runtime, { recursive: true, force: true });
+  }
+}
+
+function testScriptTaskReplyRequiresExistingGeneratedArtifact() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-script-artifact-"));
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), "task-script-runtime-"));
+  try {
+    const task = createTaskRequest({
+      workspace: temp,
+      scope: "private",
+      scopeID: 1234500001,
+      userID: 1234500001,
+      messageID: 94,
+      taskType: "script_create_and_run",
+      confidence: 0.68,
+      text: "写 python 脚本",
+      status: "delegated",
+    });
+    fs.mkdirSync(path.join(temp, "local_files", "generated"), { recursive: true });
+    fs.writeFileSync(path.join(temp, "local_files", "generated", "stats.py"), "print('ok')\n", "utf8");
+    const done = updateTaskRequestFromBotReply({
+      workspace: temp,
+      triggerMsg: { message_id: 94 },
+      text: "已生成并保存：local_files/generated/stats.py，syntax 和 dry_run 已通过。",
+      runtimeDir: runtime,
+    });
+    assert.strictEqual(done.status, "done");
+    const receipt = readTaskReceipt({ workspace: temp, id: task.id });
+    assert.deepStrictEqual(receipt.artifacts, ["local_files/generated/stats.py"]);
+    assert.ok(receipt.checks.some((item) => item.name === "syntax" && item.status === "passed"));
+
+    const missingTask = createTaskRequest({
+      workspace: temp,
+      scope: "private",
+      scopeID: 1234500001,
+      userID: 1234500001,
+      messageID: 95,
+      taskType: "script_create_and_run",
+      text: "写 js 脚本",
+      status: "delegated",
+    });
+    const failed = updateTaskRequestFromBotReply({
+      workspace: temp,
+      triggerMsg: { message_id: 95 },
+      text: "已生成并保存：local_files/generated/missing.js",
+    });
+    assert.strictEqual(failed.status, "failed");
+    assert.strictEqual(readTaskReceipt({ workspace: temp, id: missingTask.id }).result.reason, "missing");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+    fs.rmSync(runtime, { recursive: true, force: true });
+  }
+}
+
+function testScriptTaskCheckerRunsSyntaxAndDryRunSafely() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-script-checker-"));
+  try {
+    const generated = path.join(temp, "local_files", "generated");
+    fs.mkdirSync(generated, { recursive: true });
+    const okFile = path.join(generated, "ok.py");
+    fs.writeFileSync(okFile, "print('ok')\n", "utf8");
+    const ok = runScriptTaskChecks({ workspace: temp, filePath: okFile, checks: ["syntax", "dry_run"] });
+    assert.strictEqual(ok.ok, true);
+    assert.ok(ok.checks.some((item) => item.name === "syntax" && item.status === "passed"));
+    assert.ok(ok.checks.some((item) => item.name === "dry_run" && item.status === "passed"));
+
+    const badSyntax = path.join(generated, "bad.py");
+    fs.writeFileSync(badSyntax, "def bad(:\n", "utf8");
+    const syntax = runScriptTaskChecks({ workspace: temp, filePath: badSyntax, checks: ["syntax"] });
+    assert.strictEqual(syntax.ok, false);
+    assert.strictEqual(syntax.checks[0].name, "syntax");
+
+    const unsafe = path.join(generated, "unsafe.py");
+    fs.writeFileSync(unsafe, "import subprocess\nprint('x')\n", "utf8");
+    assert.strictEqual(scriptSafety(unsafe).ok, false);
+    const dryRun = runScriptTaskChecks({ workspace: temp, filePath: unsafe, checks: ["dry_run"] });
+    assert.strictEqual(dryRun.ok, false);
+    assert.strictEqual(dryRun.checks[0].detail, "dry_run_safety_blocked");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testLocalNaturalTaskUpdatesTaskStatus() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-request-local-"));
+  try {
+    const result = executeNaturalTask({
+      text: "每天晚上 9 点提醒我检查余额",
+      msg: { message_id: 44 },
+      workspace: temp,
+      context: { scope: "private", scopeID: 1234500001, userID: 1234500001 },
+    });
+    assert.strictEqual(result.handled, true);
+    assert.strictEqual(result.ok, true);
+    const tasks = listTaskRequests({ workspace: temp });
+    assert.strictEqual(tasks.length, 1);
+    assert.strictEqual(tasks[0].status, "done");
+    assert.strictEqual(tasks[0].task_type, "scheduled_reminder");
+    assert.strictEqual(tasks[0].result.ok, true);
+    const receipt = readTaskReceipt({ workspace: temp, id: tasks[0].id });
+    assert.strictEqual(receipt.status, "done");
+    assert.strictEqual(receipt.checks[0].status, "passed");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testGroupNaturalTaskRoutesWithoutAtButNormalChatDoesNot() {
+  const taskMsg = {
+    post_type: "message",
+    message_type: "group",
+    group_id: 9876500001,
+    user_id: 1234500001,
+    message_id: 7,
+    raw_message: "帮我把刚才上传的脚本改好发回来",
+  };
+  assert.strictEqual(naturalTaskRouteForMessage(taskMsg).kind, "task");
+  assert.strictEqual(shouldDispatchListenMessage(taskMsg), true);
+
+  const chatMsg = {
+    post_type: "message",
+    message_type: "group",
+    group_id: 9876500001,
+    user_id: 1234500001,
+    message_id: 8,
+    raw_message: "今天吃什么",
+  };
+  assert.strictEqual(naturalTaskRouteForMessage(chatMsg).kind, "chat");
+  assert.strictEqual(shouldDispatchListenMessage(chatMsg), false);
+}
+
+function testFileTaskContextListsRecentWorkspaceFilesAndUploadContract() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "task-file-context-"));
+  try {
+    addFileIndex({
+      workspace: temp,
+      scope: "private",
+      scopeID: "1234500001",
+      userID: "1234500001",
+      name: "demo.ps1",
+      originalName: "demo.ps1",
+      relativePath: "local_files/archive/2026-05-24/demo.ps1",
+      size: 120,
+      parser: "none",
+    });
+    const route = classifyTask("帮我把这个文件改成只读并发回来");
+    const parsed = parseTaskWithModel("帮我把这个文件改成只读并发回来", "file_modify_and_return", { userID: 1234500001 });
+    const context = buildTaskAgentContext({
+      text: "帮我把这个文件改成只读并发回来",
+      route,
+      parsed,
+      workspace: temp,
+      scope: "private",
+      scopeID: "1234500001",
+    });
+    assert.match(context, /最近文件候选/);
+    assert.match(context, /local_files\/archive\/2026-05-24\/demo\.ps1/);
+    assert.match(context, /local_files\/modified\//);
+    assert.match(context, /代理会按该路径自动上传/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testScheduledReminderNaturalLanguageCreatesAndFires() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "scheduled-reminder-"));
+  try {
+    const parsed = parseTaskWithModel("每天晚上 9 点提醒我检查余额", "scheduled_reminder", { userID: 1234500001 });
+    assert.strictEqual(parsed.ok, true);
+    assert.strictEqual(parsed.spec.schedule.time, "21:00");
+    assert.match(parsed.spec.message, /余额/);
+
+    const result = createReminderFromSpec(temp, parsed.spec, {
+      scope: "private",
+      scopeID: 1234500001,
+      userID: 1234500001,
+    });
+    assert.strictEqual(result.ok, true);
+    assert.match(formatReminderCreated(result.item), /已创建定时提醒/);
+    assert.strictEqual(loadReminders(temp).length, 1);
+    assert.strictEqual(dueReminders(temp, new Date("2026-05-24T20:59:00")).length, 0);
+    const due = dueReminders(temp, new Date("2026-05-24T21:00:00"));
+    assert.strictEqual(due.length, 1);
+    assert.match(due[0].text, /余额/);
+    assert.strictEqual(dueReminders(temp, new Date("2026-05-24T21:01:00")).length, 0);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testScheduledReminderGroupMentionSegmentsAndDuplicate() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "scheduled-reminder-group-"));
+  try {
+    const spec = {
+      task_type: "scheduled_reminder",
+      title: "检查余额提醒",
+      schedule: { type: "daily", time: "21:00", timezone: "Asia/Shanghai" },
+      message: "检查余额",
+      notify: { mention_user: "1234500001" }
+    };
+    assert.strictEqual(validateReminderSpec(spec).ok, true);
+    const first = createReminderFromSpec(temp, spec, { scope: "group", scopeID: 1, userID: 9 });
+    assert.strictEqual(first.ok, true);
+    const duplicate = createReminderFromSpec(temp, spec, { scope: "group", scopeID: 1, userID: 9 });
+    assert.strictEqual(duplicate.ok, false);
+    assert.strictEqual(duplicate.reason, "duplicate");
+    const segments = formatReminderSegments(first.item);
+    assert.ok(segments.some((seg) => seg.type === "at" && seg.data.qq === "1234500001"));
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testModelParseFailureFallsBackGracefully() {
+  const result = tryParseRotaWithFallback("整体值日顺序：洗手台、拖地。本周：1234500001 洗手台，1234500006 拖地。每周日晚上7点提醒", {
+    groupID: 1,
+    userID: 9,
+    commandIntent: true,
+  }, {
+    modelParser: () => "not json"
+  });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, "parse_failed");
+  assert.strictEqual(formatRotaFallbackFailure(result, "用法：x"), "用法：x");
+}
+
+function testSpecValidationRejectsInvalidData() {
+  const checked = validateRotaSpec({
+    day_of_week: 8,
+    time: "7pm",
+    tasks: ["洗手台"],
+    current_assignments: { "1234500001": "洗手台" }
+  });
+  assert.strictEqual(checked.ok, false);
+  assert.ok(checked.errors.some((item) => item.field === "day_of_week"));
+  assert.ok(checked.errors.some((item) => item.field === "time") || checked.missing.includes("time"));
+  assert.ok(checked.errors.some((item) => item.field === "tasks"));
+}
+
+function testRotaDueSendsOncePerDate() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "proxy-rota-due-"));
+  try {
+    addRota(temp, {
+      group_id: 987650002,
+      created_by: 9,
+      title: "值日提醒",
+      day_of_week: 0,
+      time: "19:00",
+      members: ["A", "B", "C", "D"],
+      tasks: ["拖地", "厕所", "洗手台", "轮休"],
+      start_date: "2026-05-24",
+    });
+    assert.strictEqual(dueRotas(temp, new Date("2026-05-24T18:59:00")).length, 0);
+    const due = dueRotas(temp, new Date("2026-05-24T19:00:00"));
+    assert.strictEqual(due.length, 1);
+    assert.match(due[0].text, /A：拖地/);
+    assert.strictEqual(dueRotas(temp, new Date("2026-05-24T19:01:00")).length, 0);
+    const next = dueRotas(temp, new Date("2026-05-31T19:00:00"));
+    assert.match(next[0].text, /D：拖地[\s\S]*A：厕所/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
 }
 
 function ensureDir(dir) {
@@ -3321,16 +6696,43 @@ async function waitFor(predicate) {
 
 testAtOnlyRequiredPorts();
 testMetricsTextIncludesOperationalCounters();
+testImageCredentialsUseOpenTokenPool();
 testLatexDisplayDelimitersRenderAsImageAndCleanText();
+testMarkdownFallsBackToPlainQQText();
+testFormulaAndLongRepliesRenderForGroupAndPrivate();
+testPagedRenderedRepliesSendAllImages();
+testRenderFailureKeepsOriginalOutgoingText();
+testImagemagickRendererUsesCaptionFilesAndPaginatesBody();
+testPrivatePdfDetectionOnlyMatchesPdfFiles();
+testOutgoingFileUploadCandidatesRequireModifiedLocalFiles();
+testFileOutboxCandidatesMatchCurrentChatOnly();
+testNapCatContainerPathMapsToHostDataDir();
+testNormalOutgoingDoesNotRenderImage();
+testSilentReplySentinelIsSuppressedForGroupAndPrivate();
+testOutgoingRenderTargetSupportsSendMsgPrivateFallback();
 testAdminPokeAckUsesNapCatPokeAction();
 testProfileContextPreservesImageSegment();
 testMfaceIsNormalizedToImageWhenUrlExists();
 testQuotedImageIsForwardedWhenUserRepliesToImage();
 testRawCQImageAndStickerAreNormalized();
+testEnrichedContextIsDedupedRedactedAndCapped();
+testProfileContextKeepsMemberProfileAheadOfLongGroupProfile();
+testConversationGapAndReplyChainContext();
+testRecentChatRowsReadsTailAcrossRecentFiles();
+testMoodTrackerPersistsPrivateMoodAndGroupEnergy();
+testGroupEnergyContextSkipsExplicitAnswerRequests();
+testFeedbackDetectorRecordsAndDeduplicates();
+testFeedbackRuntimeCarriesTriggerMessageForImplicitSignals();
+testReplyToKnownBotMessageUsesFocusedGroupEnergyContext();
+testGroupFeedbackContextIsScopedToCurrentUser();
+testProactiveEngagerKnowledgeMatchAndCooldown();
+testIntelligenceCommandsUseInjectedStatusProviders();
+testIntelligenceStatusCommandsExposeRuntimeDiagnostics();
 testInvalidProxyStateIsQuarantinedAndReset();
 testAtOnlyModeCommandCannotEnableAll();
 testProfileCommandShowsGroupAndMemberFacts();
 testStatusShowsCapabilities();
+testCapabilitySnapshotReportsTaskAgentSurface();
 testHelpIndexFiltersByContextAndKeyword();
 testRememberSearchAndForgetStructuredMemory();
 testDuplicateRememberIsDeterministicallySkippedAndStatsWork();
@@ -3354,6 +6756,53 @@ testProposalExecutionGateBlocksRiskyAcceptedProposals();
 testProposalExecutionGateChecksRiskyLinks();
 testProposalLandableDoesNotCrossWorkspace();
 testTodoCommandAddListDoneAndStats();
+testRotaSchedulerParsesWeeklyDutyRequestAndRotates();
+testRotaSchedulerParsesCurrentDutyAssignmentsAndMentions();
+testRotaCommandCreatesListsAndDeletesCurrentWorkspaceOnly();
+testRotaFallbackToModelParseWhenRegexFails();
+testRotaModelSpecCreatesExpectedAssignments();
+testRotaCommandAndAtMentionBothUseFallback();
+testMissingRotaFieldsAskOneQuestion();
+testMissingRotaFieldsPersistFollowupAndCreate();
+testRotaCommandMissingFieldsStartsFollowup();
+testDuplicateRotaIsDetected();
+testTaskIntentRouterClassifiesNaturalLanguage();
+testTaskAgentSchemaValidationHandlesNestedModelJSON();
+testTaskAgentBuildsSchemaPromptForModelParser();
+testTaskAgentOptionalCommandParserUsesRequestJSON();
+testNaturalTaskPipelinePassesModelParserCommandOptions();
+testNaturalTaskPipelineUsesRegistryAndRejectsUnsupportedExecutors();
+testNaturalTaskMissingFieldsAskOneQuestionBeforeDelegation();
+testAwaitingInputContinuationMergesSupplementIntoOriginalTask();
+testExplicitTaskContinueCommandBuildsOriginalTaskSupplement();
+testDeployRestartNaturalTaskRequiresConfirmation();
+testTaskRequestStoreDedupesAndTracksUpdates();
+testTaskCommandListsAndShowsWorkspaceTasks();
+testTaskCommandFiltersAndShowsUploadReceiptStatus();
+testTaskCommandConfirmsAndCancelsDeployRestartOnly();
+testTaskCommandCancelsAwaitingInputByOwnerOnly();
+testFileModifyTaskPreparationPicksRecentWorkspaceFile();
+testDelegatedTaskStatusClosesFromAgentReply();
+testTaskArtifactUploadsWriteTargetedOutbox();
+testTaskArtifactUploadResultUpdatesReceipt();
+testFileTaskReplyRequiresExistingModifiedArtifact();
+testTaskAgentContextEnrichesDelegatedNaturalTasks();
+testTaskAgentContextStoresPreparedFileSpecFromRecentFile();
+testDelegatedFilePipelineStoresPreparedSpecBeforeAgentDispatch();
+testFileModifyTaskCanRunConfiguredLocalModifier();
+testScriptCreateTaskPreparationUsesGeneratedWorkspacePath();
+testScriptCreateContextAndPipelineStorePreparedSpec();
+testScriptCreateTaskCanRunConfiguredLocalGenerator();
+testScriptTaskReplyRequiresExistingGeneratedArtifact();
+testScriptTaskCheckerRunsSyntaxAndDryRunSafely();
+testLocalNaturalTaskUpdatesTaskStatus();
+testGroupNaturalTaskRoutesWithoutAtButNormalChatDoesNot();
+testFileTaskContextListsRecentWorkspaceFilesAndUploadContract();
+testScheduledReminderNaturalLanguageCreatesAndFires();
+testScheduledReminderGroupMentionSegmentsAndDuplicate();
+testModelParseFailureFallsBackGracefully();
+testSpecValidationRejectsInvalidData();
+testRotaDueSendsOncePerDate();
 testTodoCommandWorkspaceIsolationAndDoneByID();
 testTodoDoneListSortedLimitedMaskedAndScoped();
 testTodoSearchKeepsGlobalActiveIndexesAndExplicitAddSemantics();
@@ -3405,8 +6854,11 @@ testAdminRoutesShowPortMaps();
 testAdminTailReadsOnlyNamedLogsAndMasks();
 testAdminReloadCallsRuntimeHook();
 testDreamPromptsKeepSelfIterationBounded();
+testEvidencePacketCompactsChatJsonForModelInput();
+testJSONLShardWriterRollsOverAndReadsAllShards();
 testGroupUploadRequestsDownload();
-testGroupFileDownloadArchivesText().then(() => {
+testGroupFileDownloadArchivesText()
+  .then(() => {
   console.log("onebot proxy unit checks ok");
 }).catch((err) => {
   console.error(err);

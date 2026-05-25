@@ -152,8 +152,12 @@ node --check scripts/generate-image.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: generate-image.js" }
 node --check scripts/render-qq-card-imagemagick.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: render-qq-card-imagemagick.js" }
+node --check scripts/lib/rota-scheduler.js
+if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: rota-scheduler.js" }
 node --check scripts/audit-private-data.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: audit-private-data.js" }
+node --check scripts/monitor-opentoken-subscriptions.js
+if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: monitor-opentoken-subscriptions.js" }
 node --check scripts/check-private-data-explain-canaries.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: check-private-data-explain-canaries.js" }
 node --check scripts/explain-route-scope.js
@@ -182,6 +186,8 @@ node --check scripts/check-review-packet-fallback-safety-canaries.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: check-review-packet-fallback-safety-canaries.js" }
 node --check scripts/check-review-packet-real-phrase-canaries.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: check-review-packet-real-phrase-canaries.js" }
+node --check scripts/check-opentoken-subscription-monitor-canaries.js
+if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: check-opentoken-subscription-monitor-canaries.js" }
 node --check scripts/test-onebot-proxy-units.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: test-onebot-proxy-units.js" }
 node --check scripts/test-private-data-audit.js
@@ -220,6 +226,8 @@ node scripts/check-review-packet-fallback-safety-canaries.js
 if ($LASTEXITCODE -ne 0) { throw "review packet fallback safety canary checks failed" }
 node scripts/check-review-packet-real-phrase-canaries.js
 if ($LASTEXITCODE -ne 0) { throw "review packet real phrase canary checks failed" }
+node scripts/check-opentoken-subscription-monitor-canaries.js
+if ($LASTEXITCODE -ne 0) { throw "opentoken subscription monitor canary checks failed" }
 node scripts/audit-private-data.js --scope Publish
 if ($LASTEXITCODE -ne 0) { throw "private-data publish audit failed" }
 
@@ -301,15 +309,15 @@ try {
   New-Item -ItemType Directory -Force -Path $defaultRulesRoot | Out-Null
   try {
     $defaultVisibleFiles = @(
-      "groups/sandbox-1107099585/AGENTS.md",
-      "groups/sandbox-1107099585/README.md",
-      "groups/sandbox-1107099585/scripts/tool.js"
+      "groups/sandbox-9876500001/AGENTS.md",
+      "groups/sandbox-9876500001/README.md",
+      "groups/sandbox-9876500001/scripts/tool.js"
     )
     $defaultExcludedFiles = @(
-      ("users/" + "1602858215/README.md"),
-      ("groups/sandbox-1107099585/" + "memory/" + "cha" + "t-2026-05-24.jsonl"),
-      "groups/sandbox-1107099585/local_files/upload.txt",
-      "groups/sandbox-1107099585/files/upload.txt"
+      ("users/" + "1234500001/README.md"),
+      ("groups/sandbox-9876500001/" + "memory/" + "cha" + "t-2026-05-24.jsonl"),
+      "groups/sandbox-9876500001/local_files/upload.txt",
+      "groups/sandbox-9876500001/files/upload.txt"
     )
     $defaultTokenLine = ("access_" + "token = abcdefghijklmnop")
     foreach ($relative in @($defaultVisibleFiles + $defaultExcludedFiles)) {

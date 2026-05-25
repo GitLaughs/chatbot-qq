@@ -1,5 +1,5 @@
 param(
-    [string]$LocalBackupDir = "E:\CHATBOT-QQ\backup\server-daily",
+    [string]$LocalBackupDir = "C:\chatbot-qq\backup\server-daily",
     [int]$MaxAgeHours = 30,
     [string]$TaskName = "CHATBOT-QQ server daily backup",
     [switch]$SkipTaskCheck

@@ -8,8 +8,13 @@ const { formatPolicyDrift, scanPolicyDrift } = require("./policy-drift");
 const { addMemory, applyPendingCandidates, applyPendingCandidatesWith, comparePendingCandidateSnapshot, diffPendingCandidateSnapshot, formatMemories, formatMemoryEvidence, formatMemoryStats, formatPendingCandidates, formatPendingCandidateApplyResult, formatPendingCandidateBatchResult, formatPendingCandidateHealth, formatPendingCandidateSearch, formatPendingCandidateSnapshot, formatPendingCandidateSnapshotCompare, formatPendingCandidateSnapshotDiff, formatPendingCandidateStats, formatPendingCandidateTriage, formatRecentMemories, inferKind, latestPendingCandidateSnapshot, memoryStats, pendingCandidateHealth, pendingCandidateSnapshot, pendingCandidateStats, pendingCandidateTriage, processPendingCandidatesBatch, readPendingCandidates, savePendingCandidates, searchMemories, searchMemoryEvidence, searchPendingCandidates, skipPendingCandidates, softDeleteMemories } = require("./memory-store");
 const { addProposal, addProposalLink, checkProposal, exportProposals, formatDuplicateProposal, formatLandableProposals, formatProposal, formatProposalCheck, formatProposalExport, formatProposalLinkResult, formatProposalLinksCommand, formatProposals, formatProposalStats, formatRoundProposal, getProposal, listLandableProposals, listProposals, pickProposalForRound, proposalStats, searchProposals, updateProposalStatus } = require("./proposal-store");
 const { formatRecentErrors, readRecentErrors, recentErrorStats } = require("./recent-errors");
+const { deleteRota, formatRotaCreated, formatRotas, listActiveRotas } = require("./rota-scheduler");
+const { startPendingRotaTask } = require("./rota-followup");
+const { createRotaFromText, formatRotaFallbackFailure } = require("./rota-task-fallback");
 const { redactSecrets } = require("./sensitive-redaction");
+const { findTaskRequestByID, formatTaskRequestDetail, formatTaskRequests, listTaskRequests, readTaskReceipt, updateTaskRequest, writeTaskReceipt } = require("./task-request-store");
 const { addTodo, completeTodos, findTodoBySourceProposal, formatDoneTodos, formatTodoSearch, formatTodos, formatTodoStats, listDoneTodos, listTodos, searchTodos, sourceProposalIDs, todoStats } = require("./todo-store");
+const { readJSONLShards } = require("./jsonl-shards");
 
 let sharedCommandActive = 0;
 
@@ -29,6 +34,8 @@ const COMMAND_NAMES = [
   "/总结今天", "总结今天", "/今日总结", "今日总结",
   "/建议箱", "建议箱", "/提案", "提案",
   "/待办", "待办",
+  "/任务", "任务",
+  "/提醒", "提醒", "/轮值", "轮值", "/值日", "值日",
   "/候选记忆", "候选记忆",
   "/处理候选记忆", "处理候选记忆",
   "/应用候选记忆", "应用候选记忆",
@@ -41,26 +48,32 @@ const COMMAND_NAMES = [
   "/模式", "模式",
   "/admin", "/管理", "管理",
   "/最近错误", "最近错误"
+  , "/连续", "/continuity", "连续"
+  , "/心情", "/mood", "心情"
+  , "/反馈", "/feedback", "反馈"
+  , "/主动", "/proactive", "主动"
 ];
 
 const HELP_ENTRIES = [
   { scope: "all", title: "/help [关键词]", detail: "查看功能；带关键词时搜索命令", tags: ["帮助", "命令", "help"] },
-  { scope: "all", title: "/概览", detail: "查看当前群/私聊 workspace 概览；/工作区 体检", tags: ["概览", "工作区", "状态", "体检"] },
+  { scope: "all", title: "/概览", detail: "查看当前 workspace 的记忆、待办、文件和错误概览；/工作区 体检", tags: ["概览", "工作区", "状态", "体检"] },
   { scope: "all", title: "/审查包", detail: "生成当前 workspace 子 agent 审查上下文包", tags: ["审查", "agent", "迭代", "上下文"] },
   { scope: "all", title: "/口径巡检", detail: "扫描文档和审计脚本中的架构/隐私边界漂移", tags: ["口径", "巡检", "文档", "边界"] },
-  { scope: "all", title: "/status", detail: "查看连接、队列、触发模式", tags: ["状态", "连接", "队列", "模式"] },
+  { scope: "all", title: "/status", detail: "查看 OneBot、cc-connect、队列、画图、触发模式和能力快照", tags: ["状态", "连接", "队列", "模式", "能力", "provider"] },
   { scope: "all", title: "/status index", detail: "查看共享索引状态", tags: ["状态", "索引", "共享"] },
   { scope: "all", title: "/files find 关键词", detail: "查共享文件索引", tags: ["文件", "共享", "索引"] },
-  { scope: "all", title: "/文件", detail: "查看当前群/私聊本地文件索引状态", tags: ["文件", "状态", "索引"] },
-  { scope: "all", title: "/记住 内容", detail: "写入当前用户/群画像", tags: ["记忆", "画像", "偏好"] },
+  { scope: "all", title: "/文件", detail: "查看当前 workspace 文件索引、抽取文本和解析统计", tags: ["文件", "状态", "索引", "抽取", "解析"] },
+  { scope: "all", title: "/记住 内容", detail: "手动写入当前用户/群画像；定时画像更新会先读紧凑证据包", tags: ["记忆", "画像", "偏好", "证据包"] },
   { scope: "all", title: "/记忆 关键词", detail: "搜索结构化记忆；/记忆 最近 查看最近记忆", tags: ["记忆", "搜索", "最近"] },
   { scope: "all", title: "/证据 关键词", detail: "查看记忆来源和候选依据", tags: ["记忆", "证据", "为什么"] },
   { scope: "all", title: "/画像", detail: "查看当前群/个人画像", tags: ["画像", "记忆", "偏好"] },
   { scope: "all", title: "/忘记 关键词", detail: "删除画像中匹配的记录", tags: ["记忆", "删除"] },
-  { scope: "all", title: "/总结今天", detail: "汇总今天聊天并生成候选记忆", tags: ["总结", "候选", "记忆"] },
+  { scope: "all", title: "/总结今天", detail: "从当天聊天生成候选记忆；运行期 JSONL 会按阈值自动分片", tags: ["总结", "候选", "记忆", "jsonl", "分片"] },
   { scope: "all", title: "/建议箱", detail: "列自迭代提案；/建议箱 add 标题 | 正文；/提案 导出 [数量|all]", tags: ["建议", "提案", "迭代", "backlog", "导出"] },
   { scope: "all", title: "/待办", detail: "列待办；/待办 已完成 [数量]；/待办 搜索 关键词；/待办 add 内容；/待办 done 序号|id", tags: ["待办", "todo", "搜索", "已完成"] },
   { scope: "all", title: "/待办 候选", detail: "列待办候选；/待办 应用候选 序号|all", tags: ["待办", "候选"] },
+  { scope: "all", title: "/任务 [task_id]", detail: "查看自然语言任务；支持继续/取消；文件和脚本产物保存到 local_files", tags: ["任务", "自然语言", "状态", "receipt", "local_files"] },
+  { scope: "group", title: "/提醒 每周日晚上7点 A B C D 分别拖地、厕所、洗手台、轮休", detail: "创建群轮值提醒；/提醒 列表；/提醒 删除 序号|id", tags: ["提醒", "值日", "轮值", "定时"] },
   { scope: "all", title: "/候选记忆 [关键词]", detail: "查看或筛选待确认记忆；/候选记忆 快照；/候选记忆 对比 sha；/候选记忆 差异 sha；/候选记忆 体检；/候选记忆 分拣", tags: ["候选", "记忆", "搜索", "快照", "对比", "差异", "体检", "分拣"] },
   { scope: "all", title: "/处理候选记忆 应用:1,2 跳过:3", detail: "按同一快照批量应用/跳过候选记忆", tags: ["候选", "记忆", "批处理", "应用", "跳过"] },
   { scope: "all", title: "/应用候选记忆 序号|all", detail: "确认写入候选记忆", tags: ["候选", "记忆", "应用"] },
@@ -69,12 +82,16 @@ const HELP_ENTRIES = [
   { scope: "all", title: "/找文件 关键词", detail: "查本群/私聊文件索引", tags: ["文件", "搜索", "索引"] },
   { scope: "group", title: "/安静 30分钟", detail: "暂停群内主动回复", tags: ["群", "静默", "模式"] },
   { scope: "group", title: "/恢复", detail: "恢复群内主动回复", tags: ["群", "静默", "恢复"] },
-  { scope: "all", title: "/队列", detail: "查看等待发送、画图、监听队列", tags: ["队列", "画图", "监听"] },
+  { scope: "all", title: "/队列", detail: "查看待发送、待回执、画图和监听队列", tags: ["队列", "画图", "监听", "回执"] },
   { scope: "group", title: "/模式 selective|mention|all|off", detail: "切换本群触发模式", tags: ["群", "模式", "触发"] },
   { scope: "all", title: "/最近错误", detail: "查看代理最近错误", tags: ["错误", "日志", "报错"] },
-  { scope: "all", title: "/画图 prompt", detail: "生成图片", tags: ["画图", "图片"] },
+  { scope: "all", title: "/连续", detail: "查看会话连续性状态", tags: ["连续", "上下文", "会话"] },
+  { scope: "all", title: "/心情", detail: "查看私聊情绪或群聊能量", tags: ["心情", "情绪", "能量"] },
+  { scope: "all", title: "/反馈 [最近]", detail: "查看 bot 回复后的隐式反馈统计", tags: ["反馈", "满意度"] },
+  { scope: "group", title: "/主动 off|low|normal|high", detail: "查看或设置本群主动参与级别", tags: ["主动", "参与", "插话"] },
+  { scope: "all", title: "/画图 prompt", detail: "生成图片；队列和可用能力见 /status", tags: ["画图", "图片", "image"] },
   { scope: "private", title: "/admin", detail: "管理员控制台", tags: ["管理员", "admin", "控制台"] },
-  { scope: "group", title: "/dream 或 做梦", detail: "整理群记忆", tags: ["dream", "做梦", "记忆", "群"] }
+  { scope: "group", title: "/dream 或 做梦", detail: "整理群记忆；先生成紧凑证据包，不直接让模型扫原始聊天 JSONL", tags: ["dream", "做梦", "记忆", "群", "证据包", "jsonl"] }
 ];
 
 function createProxyCommands(deps) {
@@ -137,6 +154,10 @@ function createProxyCommands(deps) {
     if (proposal !== null) return reply(proposalCommand(msg, proposal));
     const todo = commandBody(msg, ["/待办", "待办"]);
     if (todo !== null) return reply(todoCommand(msg, todo));
+    const task = commandBody(msg, ["/任务", "任务"]);
+    if (task !== null) return reply(taskCommand(msg, task));
+    const rota = commandBody(msg, ["/提醒", "提醒", "/轮值", "轮值", "/值日", "值日"]);
+    if (rota !== null) return reply(rotaCommand(msg, rota));
     const pendingMemory = commandBody(msg, ["/候选记忆", "候选记忆"]);
     if (pendingMemory !== null) return reply(showPendingMemoryCandidates(msg));
     const processMemory = commandBody(msg, ["/处理候选记忆", "处理候选记忆"]);
@@ -161,6 +182,14 @@ function createProxyCommands(deps) {
     if (admin !== null) return reply(adminCommand(msg, admin));
     const errors = commandBody(msg, ["/最近错误", "最近错误"]);
     if (errors !== null) return reply(recentErrors());
+    const continuity = commandBody(msg, ["/连续", "/continuity", "连续"]);
+    if (continuity !== null) return reply(deps.continuityStatus ? deps.continuityStatus(msg) : "未启用连续性状态。");
+    const mood = commandBody(msg, ["/心情", "/mood", "心情"]);
+    if (mood !== null) return reply(deps.moodStatus ? deps.moodStatus(msg) : "未启用心情状态。");
+    const feedback = commandBody(msg, ["/反馈", "/feedback", "反馈"]);
+    if (feedback !== null) return reply(deps.feedbackStatus ? deps.feedbackStatus(msg, feedback) : "未启用反馈状态。");
+    const proactive = commandBody(msg, ["/主动", "/proactive", "主动"]);
+    if (proactive !== null) return reply(proactiveCommand(msg, proactive));
   }
 
   function proxyHelpText(isPrivate, query = "") {
@@ -168,16 +197,18 @@ function createProxyCommands(deps) {
     const q = String(query || "").trim().toLowerCase();
     const matches = q ? visible.filter((entry) => helpHaystack(entry).includes(q)) : visible;
     if (q && matches.length === 0) {
-      return `没有找到相关命令：${query}`;
+      return [
+        `命令搜索：${query}`,
+        "━━━━━━━━━━━━",
+        "没有找到相关命令。",
+        "试试：/help 文件、/help 待办、/help 记忆",
+        "只显示当前聊天可用命令。"
+      ].join("\n");
     }
-    const picked = q ? matches.slice(0, 10) : defaultHelpEntries(visible, isPrivate);
-    const head = q ? `命令搜索：${query}` : "可用命令：";
-    const tail = q ? [] : ["提示：用 /help 关键词 或 /命令 关键词 搜索，例如 /help 待办。"];
-    return [
-      head,
-      ...picked.map((entry) => `${entry.title}：${entry.detail}`),
-      ...tail
-    ].join("\n").slice(0, 1600);
+    if (q) {
+      return formatHelpSearch(query, matches.slice(0, 10));
+    }
+    return formatDefaultHelp(visible, isPrivate);
   }
 
   function proxyStatusText(msg) {
@@ -659,6 +690,224 @@ function createProxyCommands(deps) {
     return item ? `已添加待办：${deps.maskSensitive(item.text)}` : "待办内容为空。";
   }
 
+  function taskCommand(msg, body) {
+    const workspace = msg.message_type === "group" ? deps.workspaceForGroup(msg.group_id) : deps.workspaceForPrivateUser(msg.user_id);
+    const text = String(body || "").trim();
+    if (!text || /^(最近|列表|list|recent)$/i.test(text)) {
+      return deps.maskSensitive(formatTaskRequests(listTaskRequests({ workspace, limit: 8 }), { limit: 8 }));
+    }
+    const filterMatch = text.match(/^(pending|待处理|进行中|open|done|完成|failed|失败|cancelled|已取消|cancel)$/i);
+    if (filterMatch) {
+      return deps.maskSensitive(formatTaskRequests(filteredTaskRequests({ workspace, filter: filterMatch[1], limit: 12 }), { limit: 12 }));
+    }
+    const confirmMatch = text.match(/^(确认|approve|同意)\s+(\S+)/i);
+    if (confirmMatch) {
+      return deps.maskSensitive(confirmTaskCommand({ msg, workspace, id: confirmMatch[2], decision: "approved" }));
+    }
+    const cancelMatch = text.match(/^(取消|cancel|拒绝)\s+(\S+)/i);
+    if (cancelMatch) {
+      return deps.maskSensitive(cancelTaskCommand({ msg, workspace, id: cancelMatch[2] }));
+    }
+    const id = text.replace(/^详情\s*/u, "").trim();
+    const task = findTaskRequestByID({ workspace, id });
+    const receipt = task ? readTaskReceipt({ workspace, id: task.id }) : null;
+    return deps.maskSensitive(formatTaskRequestDetail(task, receipt));
+  }
+
+  function filteredTaskRequests({ workspace, filter, limit = 12 }) {
+    const key = String(filter || "").toLowerCase();
+    const statusGroups = {
+      pending: ["new", "delegated", "running", "awaiting_input", "awaiting_confirmation", "approved"],
+      "待处理": ["new", "delegated", "running", "awaiting_input", "awaiting_confirmation", "approved"],
+      "进行中": ["new", "delegated", "running", "awaiting_input", "awaiting_confirmation", "approved"],
+      open: ["new", "delegated", "running", "awaiting_input", "awaiting_confirmation", "approved"],
+      done: ["done"],
+      "完成": ["done"],
+      failed: ["failed"],
+      "失败": ["failed"],
+      cancelled: ["cancelled"],
+      cancel: ["cancelled"],
+      "已取消": ["cancelled"],
+    };
+    const wanted = statusGroups[key] || [];
+    return listTaskRequests({ workspace, limit: 200 })
+      .filter((item) => wanted.includes(String(item.status || "")))
+      .slice(-Math.max(1, Number(limit) || 12));
+  }
+
+  function confirmTaskCommand({ msg, workspace, id, decision }) {
+    if (!canAdmin(msg)) return "没有权限。";
+    const task = findTaskRequestByID({ workspace, id });
+    if (!task) return "没有找到这个任务。";
+    if (task.task_type !== "deploy_or_restart") {
+      return "这个任务不需要部署/重启确认。";
+    }
+    if (!["awaiting_confirmation", "delegated"].includes(String(task.status || ""))) {
+      return `这个任务当前状态是 ${task.status || "-"}，不能重复确认或取消。`;
+    }
+    const status = decision === "approved" ? "approved" : "cancelled";
+    const result = {
+      ok: status === "approved",
+      decision: status,
+      task_type: task.task_type,
+      approved_by: String(msg.user_id || ""),
+    };
+    updateTaskRequest({ workspace, id: task.id, status, result });
+    writeTaskReceipt({
+      workspace,
+      id: task.id,
+      receipt: {
+        status,
+        result,
+        artifacts: [],
+        checks: [{ name: "admin_confirmation", status: status === "approved" ? "passed" : "cancelled" }],
+      },
+    });
+    if (status === "cancelled") {
+      return `已取消任务：${task.id}`;
+    }
+    const deployResult = maybeRunConfirmedDeployTask({ task, workspace, msg });
+    if (deployResult) {
+      return deployResult.reply;
+    }
+    return [
+      `已确认任务：${task.id}`,
+      "仍未自动部署或重启。下一步应由 agent 在当前 workspace 内执行可验证流程；涉及服务器部署时继续遵守发布检查和健康检查。"
+    ].join("\n");
+  }
+
+  function maybeRunConfirmedDeployTask({ task, workspace, msg }) {
+    const command = normalizeTaskCommand(deps.taskDeployCommand || process.env.QQ_TASK_DEPLOY_COMMAND || "");
+    if (!command) {
+      return null;
+    }
+    const healthCommand = normalizeTaskCommand(deps.taskDeployHealthCommand || process.env.QQ_TASK_DEPLOY_HEALTH_COMMAND || "");
+    const input = {
+      version: 1,
+      role: "deploy_or_restart_executor",
+      task_id: task.id,
+      task_type: task.task_type,
+      approved_by: String(msg.user_id || ""),
+      spec: task.spec || {},
+      text: task.text || "",
+      rules: [
+        "Only deploy or restart QQ bot services for this repository.",
+        "Do not touch Feishu/OpenClaw services.",
+        "Run checks before making service changes when the command supports it.",
+        "Return non-zero on failure.",
+      ],
+    };
+    const deploy = runTaskCommand(command, input, {
+      cwd: deps.projectRoot || process.cwd(),
+      timeoutMs: Number(deps.taskDeployTimeoutMs || process.env.QQ_TASK_DEPLOY_TIMEOUT_MS || 300000) || 300000,
+    });
+    const checks = [
+      { name: "admin_confirmation", status: "passed" },
+      { name: "deploy_command", status: deploy.ok ? "passed" : "failed", detail: deploy.detail },
+    ];
+    let health = null;
+    if (deploy.ok && healthCommand) {
+      health = runTaskCommand(healthCommand, { ...input, role: "deploy_or_restart_health_check" }, {
+        cwd: deps.projectRoot || process.cwd(),
+        timeoutMs: Number(deps.taskDeployHealthTimeoutMs || process.env.QQ_TASK_DEPLOY_HEALTH_TIMEOUT_MS || 120000) || 120000,
+      });
+      checks.push({ name: "health_check", status: health.ok ? "passed" : "failed", detail: health.detail });
+    } else if (deploy.ok) {
+      checks.push({ name: "health_check", status: "skipped", detail: "QQ_TASK_DEPLOY_HEALTH_COMMAND not configured" });
+    }
+    const ok = deploy.ok && (!health || health.ok);
+    const result = {
+      ok,
+      decision: ok ? "executed" : "failed",
+      task_type: task.task_type,
+      approved_by: String(msg.user_id || ""),
+      deploy_detail: deploy.detail,
+      health_detail: health ? health.detail : "",
+    };
+    updateTaskRequest({ workspace, id: task.id, status: ok ? "done" : "failed", result, error: ok ? "" : deploy.detail || (health && health.detail) || "deploy_failed" });
+    writeTaskReceipt({
+      workspace,
+      id: task.id,
+      receipt: {
+        status: ok ? "done" : "failed",
+        result,
+        artifacts: [],
+        checks,
+      },
+    });
+    return {
+      ok,
+      reply: ok
+        ? [`已确认并执行任务：${task.id}`, `部署/重启：${deploy.detail || "passed"}`, `健康检查：${health ? health.detail || "passed" : "未配置，已跳过"}`].join("\n")
+        : [`已确认但执行失败：${task.id}`, `失败阶段：${deploy.ok ? "health_check" : "deploy_command"}`, `详情：${deploy.ok && health ? health.detail : deploy.detail}`].join("\n"),
+    };
+  }
+
+  function cancelTaskCommand({ msg, workspace, id }) {
+    const task = findTaskRequestByID({ workspace, id });
+    if (!task) return "没有找到这个任务。";
+    if (!canTaskAdmin(msg) && String(task.user_id || "") !== String(msg.user_id || "")) {
+      return "没有权限。";
+    }
+    const current = String(task.status || "");
+    if (!["awaiting_input", "awaiting_confirmation", "delegated"].includes(current)) {
+      return `这个任务当前状态是 ${current || "-"}，不能取消。`;
+    }
+    const result = {
+      ok: false,
+      decision: "cancelled",
+      task_type: task.task_type,
+      cancelled_by: String(msg.user_id || ""),
+    };
+    updateTaskRequest({ workspace, id: task.id, status: "cancelled", result });
+    writeTaskReceipt({
+      workspace,
+      id: task.id,
+      receipt: {
+        status: "cancelled",
+        result,
+        artifacts: [],
+        checks: [{ name: "user_cancel", status: "cancelled" }],
+      },
+    });
+    return `已取消任务：${task.id}`;
+  }
+
+  function rotaCommand(msg, body) {
+    if (msg.message_type !== "group") return "群轮值提醒只对群聊生效。";
+    const workspace = deps.workspaceForGroup(msg.group_id);
+    const text = String(body || "").trim();
+    if (!text || /^(列表|list|ls)$/i.test(text)) {
+      return formatRotas(listActiveRotas(workspace));
+    }
+    const deleteMatch = text.match(/^(删除|delete|del|移除)\s+(.+)$/i);
+    if (/^(删除|delete|del|移除)$/i.test(text)) {
+      return "用法：/提醒 删除 序号|id";
+    }
+    if (deleteMatch) {
+      const result = deleteRota(workspace, deleteMatch[2], String(msg.user_id || ""), canAdmin(msg));
+      if (result.deleted > 0) return `已删除群轮值提醒：${result.item.title}`;
+      if (result.reason === "forbidden") return "没有权限删除这条提醒。";
+      return "没有找到这条提醒。";
+    }
+    const result = createRotaFromText(workspace, text, {
+      groupID: msg.group_id,
+      userID: msg.user_id,
+      commandIntent: true,
+    });
+    if (!result.ok) {
+      if (result.reason === "missing_fields") {
+        return startPendingRotaTask(workspace, result, {
+          groupID: msg.group_id,
+          userID: msg.user_id,
+          sourceText: text,
+        }).reply;
+      }
+      return formatRotaFallbackFailure(result, "用法：/提醒 每周日晚上7点 A、B、C、D 分别干拖地、厕所、洗手台、轮休");
+    }
+    return result.item ? formatRotaCreated(result.item) : "创建失败：成员、任务、星期或时间不完整。";
+  }
+
   function readTodoCandidates(workspace) {
     return readPendingCandidates({ workspace })
       .filter(isTodoCandidate)
@@ -680,25 +929,60 @@ function createProxyCommands(deps) {
     ].join("\n").slice(0, 1600);
   }
 
-  function defaultHelpEntries(visible, isPrivate) {
-    const wanted = [
-      "/help [关键词]",
-      "/概览",
-      "/status",
-      "/记住 内容",
-      "/记忆 关键词",
-      "/证据 关键词",
-      "/建议箱",
-      "/待办",
-      "/待办 候选",
-      "/文件",
-      "/最近文件",
-      "/找文件 关键词",
-      "/最近错误",
-      isPrivate ? "/admin" : "/dream 或 做梦"
+  function formatDefaultHelp(visible, isPrivate) {
+    const groups = [
+      {
+        name: "常用",
+        titles: ["/help [关键词]", "/概览", "/status", "/队列"]
+      },
+      {
+        name: "记忆和画像",
+        titles: ["/记住 内容", "/记忆 关键词", "/证据 关键词", "/画像"]
+      },
+      {
+        name: "任务和文件",
+        titles: ["/任务 [task_id]", "/待办", "/提醒 每周日晚上7点 A B C D 分别拖地、厕所、洗手台、轮休", "/文件", "/找文件 关键词", "/画图 prompt"]
+      },
+      {
+        name: isPrivate ? "私聊管理" : "群管理",
+        titles: isPrivate
+          ? ["/admin", "/最近错误"]
+          : ["/模式 selective|mention|all|off", "/安静 30分钟", "/恢复", "/主动 off|low|normal|high", "/dream 或 做梦"]
+      },
+      {
+        name: "迭代维护",
+        titles: ["/建议箱", "/候选记忆 [关键词]", "/审查包", "/口径巡检"]
+      }
     ];
     const byTitle = new Map(visible.map((entry) => [entry.title, entry]));
-    return wanted.map((title) => byTitle.get(title)).filter(Boolean);
+    const lines = [
+      `QQ Bot 帮助（${isPrivate ? "私聊" : "群聊"}）`,
+      "可用命令",
+      "━━━━━━━━━━━━"
+    ];
+    for (const group of groups) {
+      const entries = group.titles.map((title) => byTitle.get(title)).filter(Boolean);
+      if (!entries.length) continue;
+      lines.push(`[${group.name}]`);
+      lines.push(...entries.map(formatHelpEntry));
+    }
+    lines.push("━━━━━━━━━━━━");
+    lines.push("查命令：/help 关键词 或 /命令 关键词；例：/help 文件、/help 待办");
+    return lines.join("\n").slice(0, 1800);
+  }
+
+  function formatHelpSearch(query, entries) {
+    return [
+      `命令搜索：${query}`,
+      "━━━━━━━━━━━━",
+      ...entries.map((entry, index) => `${index + 1}. ${entry.title}\n   ${entry.detail}`),
+      "━━━━━━━━━━━━",
+      "只显示当前聊天可用命令。"
+    ].join("\n").slice(0, 1600);
+  }
+
+  function formatHelpEntry(entry) {
+    return `${entry.title}\n  ${entry.detail}`;
   }
 
   function sharedFilesCommand(msg, body) {
@@ -1110,8 +1394,62 @@ function createProxyCommands(deps) {
     return [`${key} 日志尾部：`, ...lines].join("\n").slice(0, 1800);
   }
 
+  function proactiveCommand(msg, body) {
+    if (msg.message_type !== "group") return "主动参与只对群聊生效。";
+    const text = String(body || "").trim();
+    if (!text || /^状态|status$/i.test(text)) {
+      return deps.proactiveStatus ? deps.proactiveStatus(msg) : "未启用主动参与状态。";
+    }
+    if (!canAdmin(msg)) return "没有权限。";
+    if (!deps.setProactivityLevelForGroup) return "未配置主动参与设置。";
+    const next = deps.setProactivityLevelForGroup(msg.group_id, text);
+    if (!next) return "主动参与级别无效。可选：off、low、normal、high。";
+    deps.persistProxyState();
+    return `已设置本群主动参与级别：${next}`;
+  }
+
   function canAdmin(msg) {
     return deps.adminUsers.length === 0 || deps.adminUsers.includes(Number(msg.user_id));
+  }
+
+  function canTaskAdmin(msg) {
+    const userID = Number(msg.user_id);
+    return (deps.adminUsers || []).includes(userID) || isAdminRoot(userID);
+  }
+
+  function normalizeTaskCommand(value) {
+    if (Array.isArray(value) && value.length > 0) {
+      return { file: String(value[0]), args: value.slice(1).map(String) };
+    }
+    if (value && typeof value === "object" && value.file) {
+      return { file: String(value.file), args: Array.isArray(value.args) ? value.args.map(String) : [] };
+    }
+    const text = String(value || "").trim();
+    if (!text) return null;
+    try {
+      return normalizeTaskCommand(JSON.parse(text));
+    } catch {
+      return { file: text, args: [] };
+    }
+  }
+
+  function runTaskCommand(command, input, options = {}) {
+    const result = spawnSync(command.file, command.args || [], {
+      input: `${JSON.stringify(input)}\n`,
+      encoding: "utf8",
+      cwd: options.cwd || process.cwd(),
+      timeout: Math.max(1000, Number(options.timeoutMs || 300000) || 300000),
+      windowsHide: true,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    if (result.error) {
+      return {
+        ok: false,
+        detail: result.error.code === "ETIMEDOUT" ? "timeout" : compactOneLine(result.error.message, 300),
+      };
+    }
+    const detail = compactOneLine(result.stdout || result.stderr || `exit ${result.status}`, 300);
+    return { ok: result.status === 0, detail };
   }
 
   function isAdminRoot(userID) {
@@ -1202,17 +1540,7 @@ function collectArchiveSummaryMatches(workspace, keyword, out) {
 }
 
 function readJSONLines(file) {
-  return fs.readFileSync(file, "utf8")
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
+  return readJSONLShards(file);
 }
 
 function topKeywords(text) {

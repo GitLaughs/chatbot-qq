@@ -66,9 +66,9 @@ function runLifecycle(workspace) {
   assert.doesNotMatch(JSON.stringify(candidates), /secret-value|\/status|\[图片\]|普通闲聊/);
   rows.push(record("generate", "candidate-kinds", candidates.map((item) => item.kind).join(","), "filtered risky and note samples"));
 
-  const saved = savePendingCandidates({ workspace, scope: "group", scopeID: "1107099585", candidates });
+  const saved = savePendingCandidates({ workspace, scope: "group", scopeID: "9876500001", candidates });
   assert.strictEqual(saved.length, 4);
-  const savedAgain = savePendingCandidates({ workspace, scope: "group", scopeID: "1107099585", candidates });
+  const savedAgain = savePendingCandidates({ workspace, scope: "group", scopeID: "9876500001", candidates });
   assert.strictEqual(savedAgain.length, 0);
   assert.strictEqual(readPendingCandidates({ workspace }).length, 4);
   rows.push(record("save", "dedupe", "4 active", "duplicate save writes no new candidates"));
@@ -125,7 +125,7 @@ function runLifecycle(workspace) {
     applySelector,
     skipSelector,
     actedBy: "canary",
-    scopeID: "1107099585"
+    scopeID: "9876500001"
   });
   assert.strictEqual(batch.applied, 3);
   assert.strictEqual(batch.skipped, 2);
@@ -147,12 +147,12 @@ function checkApplySafetyLock(candidates) {
   const hintWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "pending-memory-hint-"));
   const hintTriageWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "pending-memory-hint-triage-"));
   try {
-    savePendingCandidates({ workspace: applyAllWorkspace, scope: "group", scopeID: "1107099585", candidates });
+    savePendingCandidates({ workspace: applyAllWorkspace, scope: "group", scopeID: "9876500001", candidates });
     const unsafeApply = applyPendingCandidates({
       workspace: applyAllWorkspace,
       selector: "all",
       appliedBy: "canary-unsafe",
-      scopeID: "1107099585"
+      scopeID: "9876500001"
     });
     assert.strictEqual(unsafeApply.applied, 3);
     assert.strictEqual(unsafeApply.rejected, 1);
@@ -184,7 +184,7 @@ function checkApplySafetyLock(candidates) {
       workspace: riskWorkspace,
       selector: "all",
       appliedBy: "canary-risk",
-      scopeID: "1107099585"
+      scopeID: "9876500001"
     });
     assert.strictEqual(riskyApply.applied, 0);
     assert.strictEqual(riskyApply.rejected, 2);
@@ -204,7 +204,7 @@ function checkApplySafetyLock(candidates) {
       workspace: hintWorkspace,
       selector: "all",
       appliedBy: "canary-hint",
-      scopeID: "1107099585"
+      scopeID: "9876500001"
     });
     assert.strictEqual(hintApply.applied, 1);
     assert.strictEqual(hintApply.rejected, 0);
@@ -226,7 +226,7 @@ function checkApplySafetyLock(candidates) {
       workspace: hintWorkspace,
       selector: "all",
       appliedBy: "canary-long",
-      scopeID: "1107099585"
+      scopeID: "9876500001"
     });
     assert.strictEqual(longApply.applied, 1);
     assert.strictEqual(longApply.rejected, 0);
@@ -273,7 +273,7 @@ function appendManualPendingCandidate(workspace, item) {
     version: 1,
     created_at: "2026-05-24T09:10:00.000Z",
     scope: "group",
-    scope_id: "1107099585",
+    scope_id: "9876500001",
     fingerprint: item.id,
     applied_at: "",
     applied_by: "",

@@ -11,9 +11,9 @@ const {
   ADMIN_ROOT_USERS
 } = require("./onebot-group-proxy");
 
-const ADMIN_USER = 1602858215;
-const NORMAL_USER = 2138730775;
-const GROUP_ID = 1107099585;
+const ADMIN_USER = 1234500001;
+const NORMAL_USER = 1234500002;
+const GROUP_ID = 9876500001;
 
 function main() {
   const options = parseArgs(process.argv.slice(2));

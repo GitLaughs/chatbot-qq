@@ -13,17 +13,20 @@ ExecStartPre=/bin/bash /opt/chatbot-qq/deploy/linux/wait-onebot-ports.sh
 ExecStart=/usr/bin/env cc-connect --config /root/.cc-connect-qq/config.toml --force
 Restart=always
 RestartSec=10
-NoNewPrivileges=true
+# Minimum required for Codex/bubblewrap command execution.
+# Do not change to NoNewPrivileges=true, add CapabilityBoundingSet=, or remove
+# AF_NETLINK unless `codex sandbox linux -- /bin/sh -lc 'pwd; ls -ld .'`
+# still passes under this unit's systemd sandbox.
+NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=false
-ReadWritePaths=/opt/chatbot-qq/groups /opt/chatbot-qq/users /opt/chatbot-qq/.cc-connect /root/.cc-connect-qq /root/.codex-qq-home /var/log
+ReadWritePaths=/opt/chatbot-qq /root/.cc-connect-qq /root/.codex-qq-home /var/log
 ReadOnlyPaths=/opt/chatbot-qq/AGENTS.md /opt/chatbot-qq/docs /opt/chatbot-qq/configs
-CapabilityBoundingSet=
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 SystemCallArchitectures=native
 RestrictSUIDSGID=true
 LockPersonality=true

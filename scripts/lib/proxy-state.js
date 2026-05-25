@@ -5,7 +5,7 @@ function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
-function loadProxyState({ file, listenModes, quietUntil, atOnlyGroups, log }) {
+function loadProxyState({ file, listenModes, quietUntil, proactiveLevels, atOnlyGroups, log }) {
   try {
     if (!fs.existsSync(file)) {
       return;
@@ -25,6 +25,13 @@ function loadProxyState({ file, listenModes, quietUntil, atOnlyGroups, log }) {
       const ts = Number(until);
       if (Number.isFinite(ts) && ts > now) {
         quietUntil.set(Number(groupID), ts);
+      }
+    }
+    if (proactiveLevels) {
+      for (const [groupID, level] of Object.entries(state.proactive_levels || {})) {
+        if (["off", "low", "normal", "high"].includes(level)) {
+          proactiveLevels.set(Number(groupID), level);
+        }
       }
     }
     log("proxy state loaded", file);
@@ -54,14 +61,15 @@ function quarantineInvalidState(file, log) {
   }
 }
 
-function saveProxyState({ file, listenModes, quietUntil, log }) {
+function saveProxyState({ file, listenModes, quietUntil, proactiveLevels, log }) {
   try {
     ensureDir(path.dirname(file));
     const state = {
       version: 1,
       updated_at: new Date().toISOString(),
       listen_modes: Object.fromEntries([...listenModes.entries()].map(([groupID, mode]) => [String(groupID), mode])),
-      quiet_until: Object.fromEntries([...quietUntil.entries()].map(([groupID, until]) => [String(groupID), until]))
+      quiet_until: Object.fromEntries([...quietUntil.entries()].map(([groupID, until]) => [String(groupID), until])),
+      proactive_levels: proactiveLevels ? Object.fromEntries([...proactiveLevels.entries()].map(([groupID, level]) => [String(groupID), level])) : {}
     };
     fs.writeFileSync(file, JSON.stringify(state, null, 2), "utf8");
   } catch (err) {
