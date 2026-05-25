@@ -11,22 +11,28 @@
 - OneBot v11 WebSocket 监听 `ws://127.0.0.1:3001`
 - 可选：ImageMagick、librsvg2-bin 与 Noto CJK 字体，用于把长回复、公式回复渲染成 QQ 图片
 
-安装依赖：
+如果你是新手，建议先在服务器终端里按顺序执行下面的基础命令。以下示例面向 Debian/Ubuntu，其他发行版只需要替换系统包管理命令：
 
 ```bash
-npm install -g cc-connect
+sudo apt-get update
+sudo apt-get install -y git curl ca-certificates imagemagick librsvg2-bin fonts-noto-cjk
+
+# 如果服务器还没有 Node.js 20+，先安装 Node.js 20。
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+sudo npm install -g cc-connect
 cc-connect --version
-# Debian/Ubuntu，可选但推荐
-apt-get update
-apt-get install -y imagemagick librsvg2-bin fonts-noto-cjk
+node --version
+npm --version
 ```
 
 ## 安装
 
 ```bash
-git clone https://github.com/GitLaughs/chatbot-qq.git /opt/chatbot-qq
+sudo git clone https://github.com/GitLaughs/chatbot-qq.git /opt/chatbot-qq
 cd /opt/chatbot-qq
-bash ./scripts/install-linux.sh --install-services
+sudo bash ./scripts/install-linux.sh --install-services
 ```
 
 脚本会询问：
@@ -50,10 +56,14 @@ bash ./scripts/install-linux.sh --install-services
 - 长回复/公式回复的 ImageMagick 渲染路径
 - `/dream`、`做梦`、`/画图`、`/生图`、`/img` 命令开关
 - `/help` 分组帮助、命令关键词搜索、`/任务` 自然语言任务状态入口
-- 自然语言任务代理的默认环境变量；未配置模型解析/文件修改/脚本生成命令时，会保留确定性回退或交给 cc-connect 处理
+- 自然语言任务代理默认配置：提醒、轮值、文件修改、脚本生成、部署/重启确认、任务回执和文件回传 outbox
+- 记忆管理入口：`/记住`、`/记忆`、`/证据`、`/画像`、`/忘记`、`/候选记忆` 和候选应用/跳过
+- 会话连续性、群聊能量/心情、反馈统计和主动参与配置
 - 画像更新模型：`gpt-5.5` + medium reasoning，默认读取最近 72 小时聊天记录
-- 紧凑证据包和 JSONL 分片阈值，避免画像/dream 任务直接扫大型原始聊天流水
+- 紧凑证据包和 JSONL 分片阈值，避免画像更新和 dream 直接扫大型原始聊天流水
 - 日志、生成图片、群文件归档的保留天数
+
+默认安装不会把任何 key、token、cookie、NapCat 本地配置、私聊导出、群文件或私有记忆写进仓库。安装脚本只生成服务器本机的 `/etc/chatbot-qq.env` 和 `/root/.cc-connect-qq/config.toml`；这些文件应保持 `600` 权限并留在服务器本地。
 
 如果只是刷新配置和服务文件，不想重新安装 npm 依赖：
 
@@ -71,13 +81,13 @@ bash ./scripts/install-linux.sh --install-services --enable-provider-failover --
 
 如果使用 OpenToken key 池，QQ 会选择池子里余额最高且生成探测通过的 key，不再为了 Feishu/OpenClaw 预留最高余额 key。
 
-可选任务执行器只在你明确需要自动改文件、生成脚本或确认后部署时配置。不要把 key、token、cookie 或私聊导出的内容写进仓库；这些值只放到服务器上的 `/etc/chatbot-qq.env` 或 cc-connect 本地配置里。
+可选任务执行器只在你明确需要模型解析、自动改文件、生成脚本或确认后部署时配置。留空时会使用确定性回退或交给 cc-connect 处理，不影响基础聊天、记忆、文件和帮助命令。
 
 ```bash
 # 可选：模型解析自然语言任务
 # QQ_TASK_MODEL_PARSER_COMMAND="node /opt/chatbot-qq/scripts/task-model-parser-bridge.js"
 
-# 可选：自动生成/修改 local_files 下的文件产物
+# 可选：自动修改/生成 local_files 下的文件产物
 # QQ_TASK_FILE_MODIFIER_COMMAND="node /opt/chatbot-qq/scripts/artifact-model-bridge.js"
 # QQ_TASK_SCRIPT_GENERATOR_COMMAND="node /opt/chatbot-qq/scripts/artifact-model-bridge.js"
 

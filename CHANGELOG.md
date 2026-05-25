@@ -7,6 +7,12 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+### Changed
+
+- Expanded beginner Linux install docs with copy-paste terminal commands for dependencies, Node.js, cc-connect, service install, and timer startup.
+- Tightened deploy-readiness checks so the beginner installer must include natural-language task, artifact executor, deploy confirmation, evidence packet, and JSONL shard defaults.
+- Documented the current public feature surface in the README without copying local QQ IDs, secrets, NapCat config, private logs, chat exports, or private memory.
+
 ## [0.2.19] - 2026-05-25
 
 ### Added

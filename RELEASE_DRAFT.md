@@ -9,7 +9,8 @@ This release publishes the current NapCat / OneBot + onebot-group-proxy + cc-con
 - Adds the natural-language task agent surface: reminders, weekly rota, file modification, script generation, deploy/restart confirmation, task receipts, and upload outbox tracking.
 - Improves `/help` with grouped message-box-friendly output and keyword search.
 - Adds compact evidence packets and JSONL sharding for profile updates and dream reviews.
-- Updates the beginner Linux installer and example env with task-agent, artifact executor, deploy confirmation, profile update, and evidence-packet settings.
+- Updates the beginner Linux installer and example env with task-agent, artifact executor, deploy confirmation, profile update, evidence-packet, and JSONL shard settings.
+- Adds copy-paste Linux terminal commands for new deployments and documents memory-management commands in the public feature surface.
 - Keeps public configs and docs on placeholder QQ IDs and generic install paths instead of local runtime details.
 
 ## Required Runtime

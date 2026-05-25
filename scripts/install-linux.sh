@@ -296,7 +296,7 @@ QQ_TASK_DEPLOY_TIMEOUT_MS=300000
 # QQ_TASK_DEPLOY_HEALTH_COMMAND=
 QQ_TASK_DEPLOY_HEALTH_TIMEOUT_MS=120000
 
-# Scheduled profile updater and compact evidence packet limits.
+# Scheduled profile updater, compact evidence packet, and JSONL shard limits.
 CHATBOT_QQ_PROFILE_UPDATE_MODEL=gpt-5.5
 CHATBOT_QQ_PROFILE_UPDATE_REASONING_EFFORT=medium
 CHATBOT_QQ_PROFILE_UPDATE_LOOKBACK_HOURS=72

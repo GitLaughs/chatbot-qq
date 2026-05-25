@@ -146,6 +146,24 @@ Run-Checked "natural task agent deployment surface" {
         "QQ_TASK_DEPLOY_HEALTH_COMMAND",
         "QQ_TASK_DEPLOY_HEALTH_TIMEOUT_MS"
     ) -Label "task agent env example"
+    Assert-ContainsText -File ".\scripts\install-linux.sh" -Needles @(
+        "QQ_TASK_TIMEZONE=Asia/Shanghai",
+        "# QQ_TASK_MODEL_PARSER_COMMAND=",
+        "QQ_TASK_MODEL_PARSER_MODEL=gpt-5.4",
+        "QQ_TASK_MODEL_PARSER_MODE=responses",
+        "QQ_TASK_MODEL_PARSER_TIMEOUT_MS=8000",
+        "QQ_TASK_MODEL_PARSER_HTTP_TIMEOUT_MS=30000",
+        "# QQ_TASK_FILE_MODIFIER_COMMAND=",
+        "# QQ_TASK_SCRIPT_GENERATOR_COMMAND=",
+        "QQ_TASK_ARTIFACT_MODEL=gpt-5.4",
+        "QQ_TASK_ARTIFACT_MODEL_MODE=responses",
+        "QQ_TASK_ARTIFACT_MODEL_HTTP_TIMEOUT_MS=60000",
+        "# QQ_TASK_DEPLOY_COMMAND=",
+        "QQ_TASK_DEPLOY_TIMEOUT_MS=300000",
+        "# QQ_TASK_DEPLOY_HEALTH_COMMAND=",
+        "CHATBOT_QQ_EVIDENCE_MAX_CHARS=12000",
+        "CHATBOT_QQ_JSONL_SHARD_MAX_BYTES=2097152"
+    ) -Label "beginner install task and memory env"
     Assert-ContainsText -File ".\deploy\linux\onebot-group-proxy.service" -Needles @(
         "EnvironmentFile=-/etc/chatbot-qq.env",
         "ExecStart=/usr/bin/env npm run onebot-proxy"
