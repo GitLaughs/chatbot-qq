@@ -191,19 +191,19 @@ function testGitignoreBehaviorProtectsRuntimeWithoutHidingWorkspaceFiles() {
     cp.execFileSync("git", ["init", "-q"], { cwd: root, stdio: "pipe" });
     const ignoredPaths = [
       "tmp/cache.json",
-      "users/" + "1234500001/" + "memory/dreams/20260524-events.jsonl",
-      "groups/sandbox-9876500001/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
-      "groups/sandbox-9876500001/local_files/upload.txt",
-      "groups/sandbox-9876500001/files/image.png",
+      "users/" + "100000001/" + "memory/dreams/20260524-events.jsonl",
+      "groups/sandbox-123456789/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
+      "groups/sandbox-123456789/local_files/upload.txt",
+      "groups/sandbox-123456789/files/image.png",
       "memory/search/index.sqlite3-wal",
       "runs/20260524-events.jsonl",
       "configs/onebot11_" + "123456.json",
       "chatbot-qq-qrcode.png"
     ];
     const visiblePaths = [
-      "groups/sandbox-9876500001/AGENTS.md",
-      "groups/sandbox-9876500001/README.md",
-      "groups/sandbox-9876500001/scripts/tool.js",
+      "groups/sandbox-123456789/AGENTS.md",
+      "groups/sandbox-123456789/README.md",
+      "groups/sandbox-123456789/scripts/tool.js",
       "configs/cc-connect.napcat.server.example.toml",
       "docs/qqbot-integration-plan.md",
       "scripts/test-private-data-audit.js"
@@ -226,15 +226,16 @@ function testPublishScanKeepsGroupWorkspaceFilesVisible() {
   try {
     const marker = "PUBLISH_VISIBLE_MARKER";
     const visibleFiles = [
-      "groups/sandbox-9876500001/AGENTS.md",
-      "groups/sandbox-9876500001/README.md",
-      "groups/sandbox-9876500001/scripts/tool.js"
+      "groups/sandbox-123456789/AGENTS.md",
+      "groups/sandbox-123456789/README.md",
+      "groups/sandbox-123456789/scripts/tool.js"
     ];
     const excludedFiles = [
-      "users/" + "1234500001/README.md",
-      "groups/sandbox-9876500001/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
-      "groups/sandbox-9876500001/local_files/upload.txt",
-      "groups/sandbox-9876500001/files/upload.txt"
+      "users/" + "100000001/README.md",
+      "groups/sandbox-123456789/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
+      "groups/sandbox-123456789/" + "members/" + "100000001.md",
+      "groups/sandbox-123456789/local_files/upload.txt",
+      "groups/sandbox-123456789/files/upload.txt"
     ];
     for (const file of visibleFiles.concat(excludedFiles)) {
       writeFixtureFile(root, file, `${marker}\n`);
@@ -244,7 +245,7 @@ function testPublishScanKeepsGroupWorkspaceFilesVisible() {
     fs.writeFileSync(rulesPath, JSON.stringify(makeRules({
       common_exclude_dirs: [".rules"],
       publish_exclude_dirs: ["users"],
-      publish_exclude_path_patterns: ["^groups/[^/]+/(memory|local_files|files)(/|$)"],
+      publish_exclude_path_patterns: ["^groups/[^/]+/(memory|members|local_files|files|\\.cc-connect)(/|$)"],
       patterns: [
         { name: "workspace marker", regex: marker }
       ]
@@ -265,15 +266,16 @@ function testDefaultPublishRulesKeepGroupWorkspaceFilesVisible() {
   try {
     const tokenLine = "access_" + "token = abcdefghijklmnop\n";
     const visibleFiles = [
-      "groups/sandbox-9876500001/AGENTS.md",
-      "groups/sandbox-9876500001/README.md",
-      "groups/sandbox-9876500001/scripts/tool.js"
+      "groups/sandbox-123456789/AGENTS.md",
+      "groups/sandbox-123456789/README.md",
+      "groups/sandbox-123456789/scripts/tool.js"
     ];
     const excludedFiles = [
-      "users/" + "1234500001/README.md",
-      "groups/sandbox-9876500001/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
-      "groups/sandbox-9876500001/local_files/upload.txt",
-      "groups/sandbox-9876500001/files/upload.txt"
+      "users/" + "100000001/README.md",
+      "groups/sandbox-123456789/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
+      "groups/sandbox-123456789/" + "members/" + "100000001.md",
+      "groups/sandbox-123456789/local_files/upload.txt",
+      "groups/sandbox-123456789/files/upload.txt"
     ];
     for (const file of visibleFiles.concat(excludedFiles)) {
       writeFixtureFile(root, file, tokenLine);
@@ -294,19 +296,23 @@ function testExplainPrivateDataPathUsesDefaultRules() {
   try {
     const cases = [
       {
-        input: { relativePath: "groups/sandbox-9876500001/README.md", scope: "Publish", isDirectory: false },
+        input: { relativePath: "groups/sandbox-123456789/README.md", scope: "Publish", isDirectory: false },
         expected: { excluded: false, reasonType: null }
       },
       {
-        input: { relativePath: "groups/sandbox-9876500001/" + "memory/" + "cha" + "t-2026-05-24.jsonl", scope: "Publish", isDirectory: false },
+        input: { relativePath: "groups/sandbox-123456789/" + "memory/" + "cha" + "t-2026-05-24.jsonl", scope: "Publish", isDirectory: false },
         expected: { excluded: true, reasonType: "publish_exclude_path_pattern" }
       },
       {
-        input: { relativePath: "groups/sandbox-9876500001/files/upload.txt", scope: "Publish", isDirectory: false },
+        input: { relativePath: "groups/sandbox-123456789/" + "members/" + "100000001.md", scope: "Publish", isDirectory: false },
         expected: { excluded: true, reasonType: "publish_exclude_path_pattern" }
       },
       {
-        input: { relativePath: "users/" + "1234500001/README.md", scope: "Publish", isDirectory: false },
+        input: { relativePath: "groups/sandbox-123456789/files/upload.txt", scope: "Publish", isDirectory: false },
+        expected: { excluded: true, reasonType: "publish_exclude_path_pattern" }
+      },
+      {
+        input: { relativePath: "users/" + "100000001/README.md", scope: "Publish", isDirectory: false },
         expected: { excluded: true, reasonType: "publish_exclude_dir" }
       },
       {
@@ -322,7 +328,7 @@ function testExplainPrivateDataPathUsesDefaultRules() {
         expected: { excluded: false, reasonType: null }
       },
       {
-        input: { relativePath: "users/" + "1234500001/README.md", scope: "Live", isDirectory: false },
+        input: { relativePath: "users/" + "100000001/README.md", scope: "Live", isDirectory: false },
         expected: { excluded: false, reasonType: null }
       }
     ];
@@ -395,12 +401,12 @@ function testExplainPathCliGoldenOutput() {
   try {
     const script = path.join(__dirname, "audit-private-data.js");
     assert.strictEqual(
-      assertCliSucceeds(script, ["--root", root, "--scope", "Publish", "--explain-path", "groups/sandbox-9876500001/README.md"]).stdout.trim(),
-      "SCANNED groups/sandbox-9876500001/README.md scope=Publish"
+      assertCliSucceeds(script, ["--root", root, "--scope", "Publish", "--explain-path", "groups/sandbox-123456789/README.md"]).stdout.trim(),
+      "SCANNED groups/sandbox-123456789/README.md scope=Publish"
     );
     assert.match(
-      assertCliSucceeds(script, ["--root", root, "--scope", "Publish", "--explain-path", "groups/sandbox-9876500001/files/upload.txt"]).stdout.trim(),
-      /^EXCLUDED groups\/sandbox-9876500001\/files\/upload\.txt scope=Publish reason=publish_exclude_path_pattern:/
+      assertCliSucceeds(script, ["--root", root, "--scope", "Publish", "--explain-path", "groups/sandbox-123456789/files/upload.txt"]).stdout.trim(),
+      /^EXCLUDED groups\/sandbox-123456789\/files\/upload\.txt scope=Publish reason=publish_exclude_path_pattern:/
     );
   } finally {
     removeFixtureRoot(root);
@@ -413,31 +419,37 @@ function testExplainPathCliJsonGoldenOutput() {
     const script = path.join(__dirname, "audit-private-data.js");
     const cases = [
       {
-        path: "groups/sandbox-9876500001/README.md",
+        path: "groups/sandbox-123456789/README.md",
         scanned: true,
         reasonType: null,
         reasonValue: null
       },
       {
-        path: "groups/sandbox-9876500001/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
+        path: "groups/sandbox-123456789/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
         scanned: false,
         reasonType: "publish_exclude_path_pattern",
-        reasonValue: /memory\|local_files\|files/
+        reasonValue: /memory\|members\|local_files\|files/
       },
       {
-        path: "groups/sandbox-9876500001/local_files/upload.txt",
+        path: "groups/sandbox-123456789/" + "members/" + "100000001.md",
         scanned: false,
         reasonType: "publish_exclude_path_pattern",
-        reasonValue: /memory\|local_files\|files/
+        reasonValue: /memory\|members\|local_files\|files/
       },
       {
-        path: "groups/sandbox-9876500001/files/upload.txt",
+        path: "groups/sandbox-123456789/local_files/upload.txt",
         scanned: false,
         reasonType: "publish_exclude_path_pattern",
-        reasonValue: /memory\|local_files\|files/
+        reasonValue: /memory\|members\|local_files\|files/
       },
       {
-        path: "users/" + "1234500001/README.md",
+        path: "groups/sandbox-123456789/files/upload.txt",
+        scanned: false,
+        reasonType: "publish_exclude_path_pattern",
+        reasonValue: /memory\|members\|local_files\|files/
+      },
+      {
+        path: "users/" + "100000001/README.md",
         scanned: false,
         reasonType: "publish_exclude_dir",
         reasonValue: /^users$/
@@ -501,7 +513,7 @@ function testExplainPathCliFileDirectoryJsonGoldenOutput() {
       },
       {
         args: ["--explain-directory"],
-        path: "users/" + "1234500001",
+        path: "users/" + "100000001",
         isDirectory: true,
         scanned: false,
         reasonType: "publish_exclude_dir",
@@ -509,15 +521,23 @@ function testExplainPathCliFileDirectoryJsonGoldenOutput() {
       },
       {
         args: ["--explain-directory"],
-        path: "groups/sandbox-9876500001/" + "memory",
+        path: "groups/sandbox-123456789/" + "memory",
         isDirectory: true,
         scanned: false,
         reasonType: "publish_exclude_path_pattern",
-        reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+        reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
       },
       {
         args: ["--explain-directory"],
-        path: "groups/sandbox-9876500001",
+        path: "groups/sandbox-123456789/members",
+        isDirectory: true,
+        scanned: false,
+        reasonType: "publish_exclude_path_pattern",
+        reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
+      },
+      {
+        args: ["--explain-directory"],
+        path: "groups/sandbox-123456789",
         isDirectory: true,
         scanned: true,
         reasonType: null
@@ -550,12 +570,12 @@ function testExplainCanaryCliJsonOutput() {
   const script = path.join(__dirname, "check-private-data-explain-canaries.js");
   const output = JSON.parse(assertCliSucceeds(script, ["--json"]).stdout);
   assert.strictEqual(output.ok, true);
-  assert.strictEqual(output.checked, 25);
+  assert.strictEqual(output.checked, 27);
   assert.strictEqual(output.scope, null);
-  assert.strictEqual(output.rows.length, 25);
+  assert.strictEqual(output.rows.length, 27);
   const publishRows = output.rows.filter((item) => item.scope === "Publish");
   const liveRows = output.rows.filter((item) => item.scope === "Live");
-  assert.strictEqual(publishRows.length, 15);
+  assert.strictEqual(publishRows.length, 17);
   assert.strictEqual(liveRows.length, 10);
   const expectedRows = [
     {
@@ -580,14 +600,14 @@ function testExplainCanaryCliJsonOutput() {
     },
     {
       scope: "Publish",
-      path: "users/" + "1234500001/README.md",
+      path: "users/" + "100000001/README.md",
       scanned: false,
       reasonType: "publish_exclude_dir",
       reasonValue: "users"
     },
     {
       scope: "Publish",
-      path: "users/" + "1234500001",
+      path: "users/" + "100000001",
       isDirectory: true,
       scanned: false,
       reasonType: "publish_exclude_dir",
@@ -595,73 +615,88 @@ function testExplainCanaryCliJsonOutput() {
     },
     {
       scope: "Publish",
-      path: "groups/sandbox-9876500001/README.md",
+      path: "groups/sandbox-123456789/README.md",
       scanned: true,
       reasonType: null
     },
     {
       scope: "Publish",
-      path: "groups/sandbox-9876500001/AGENTS.md",
+      path: "groups/sandbox-123456789/AGENTS.md",
       scanned: true,
       reasonType: null
     },
     {
       scope: "Publish",
-      path: "groups/sandbox-9876500001/scripts/tool.js",
+      path: "groups/sandbox-123456789/scripts/tool.js",
       scanned: true,
       reasonType: null
     },
     {
       scope: "Publish",
-      path: "groups/sandbox-9876500001",
+      path: "groups/sandbox-123456789",
       isDirectory: true,
       scanned: true,
       reasonType: null
     },
     {
       scope: "Publish",
-      path: "groups/sandbox-9876500001/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
+      path: "groups/sandbox-123456789/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
       scanned: false,
       reasonType: "publish_exclude_path_pattern",
-      reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+      reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
     },
     {
       scope: "Publish",
-      path: "groups/sandbox-9876500001/" + "memory",
+      path: "groups/sandbox-123456789/" + "memory",
       isDirectory: true,
       scanned: false,
       reasonType: "publish_exclude_path_pattern",
-      reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+      reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
     },
     {
       scope: "Publish",
-      path: "groups/sandbox-9876500001/local_files/upload.txt",
+      path: "groups/sandbox-123456789/" + "members/" + "100000001.md",
       scanned: false,
       reasonType: "publish_exclude_path_pattern",
-      reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+      reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
     },
     {
       scope: "Publish",
-      path: "groups/sandbox-9876500001/local_files",
+      path: "groups/sandbox-123456789/members",
       isDirectory: true,
       scanned: false,
       reasonType: "publish_exclude_path_pattern",
-      reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+      reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
     },
     {
       scope: "Publish",
-      path: "groups/sandbox-9876500001/files/upload.txt",
+      path: "groups/sandbox-123456789/local_files/upload.txt",
       scanned: false,
       reasonType: "publish_exclude_path_pattern",
-      reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+      reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
     },
     {
       scope: "Publish",
-      path: "groups/sandbox-9876500001/files",
+      path: "groups/sandbox-123456789/local_files",
       isDirectory: true,
       scanned: false,
       reasonType: "publish_exclude_path_pattern",
-      reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+      reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
+    },
+    {
+      scope: "Publish",
+      path: "groups/sandbox-123456789/files/upload.txt",
+      scanned: false,
+      reasonType: "publish_exclude_path_pattern",
+      reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
+    },
+    {
+      scope: "Publish",
+      path: "groups/sandbox-123456789/files",
+      isDirectory: true,
+      scanned: false,
+      reasonType: "publish_exclude_path_pattern",
+      reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
     },
     {
       scope: "Live",
@@ -677,52 +712,52 @@ function testExplainCanaryCliJsonOutput() {
     },
     {
       scope: "Live",
-      path: "users/" + "1234500001/README.md",
+      path: "users/" + "100000001/README.md",
       scanned: true,
       reasonType: null
     },
     {
       scope: "Live",
-      path: "users/" + "1234500001",
+      path: "users/" + "100000001",
       isDirectory: true,
       scanned: true,
       reasonType: null
     },
     {
       scope: "Live",
-      path: "groups/sandbox-9876500001/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
+      path: "groups/sandbox-123456789/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
       scanned: true,
       reasonType: null
     },
     {
       scope: "Live",
-      path: "groups/sandbox-9876500001/" + "memory",
+      path: "groups/sandbox-123456789/" + "memory",
       isDirectory: true,
       scanned: true,
       reasonType: null
     },
     {
       scope: "Live",
-      path: "groups/sandbox-9876500001/local_files/upload.txt",
+      path: "groups/sandbox-123456789/local_files/upload.txt",
       scanned: true,
       reasonType: null
     },
     {
       scope: "Live",
-      path: "groups/sandbox-9876500001/local_files",
+      path: "groups/sandbox-123456789/local_files",
       isDirectory: true,
       scanned: true,
       reasonType: null
     },
     {
       scope: "Live",
-      path: "groups/sandbox-9876500001/files/upload.txt",
+      path: "groups/sandbox-123456789/files/upload.txt",
       scanned: true,
       reasonType: null
     },
     {
       scope: "Live",
-      path: "groups/sandbox-9876500001/files",
+      path: "groups/sandbox-123456789/files",
       isDirectory: true,
       scanned: true,
       reasonType: null
@@ -742,10 +777,10 @@ function testExplainCanaryCliTableOutput() {
   const script = path.join(__dirname, "check-private-data-explain-canaries.js");
   const output = assertCliSucceeds(script, ["--table"]).stdout;
   assert.match(output, /^scope\s+\|\spath\s+\|\sstatus\s+\|\sreason/m);
-  assert.match(output, /Publish\s+\|\sgroups\/sandbox-9876500001\/AGENTS\.md\s+\|\sscanned\s+\|\s-/);
-  assert.match(output, /Publish\s+\|\sgroups\/sandbox-9876500001\/memory\s+\|\sexcluded\s+\|\spublish_exclude_path_pattern:/);
-  assert.match(output, /Live\s+\|\sgroups\/sandbox-9876500001\/memory\s+\|\sscanned\s+\|\s-/);
-  assert.match(output, /Publish\s+\|\susers\/1234500001\s+\|\sexcluded\s+\|\spublish_exclude_dir:users/);
+  assert.match(output, /Publish\s+\|\sgroups\/sandbox-123456789\/AGENTS\.md\s+\|\sscanned\s+\|\s-/);
+  assert.match(output, /Publish\s+\|\sgroups\/sandbox-123456789\/memory\s+\|\sexcluded\s+\|\spublish_exclude_path_pattern:/);
+  assert.match(output, /Live\s+\|\sgroups\/sandbox-123456789\/memory\s+\|\sscanned\s+\|\s-/);
+  assert.match(output, /Publish\s+\|\susers\/100000001\s+\|\sexcluded\s+\|\spublish_exclude_dir:users/);
 }
 
 function testExplainCanaryCliScopeFilter() {
@@ -753,8 +788,8 @@ function testExplainCanaryCliScopeFilter() {
   const publish = JSON.parse(assertCliSucceeds(script, ["--json", "--scope", "Publish"]).stdout);
   assert.strictEqual(publish.ok, true);
   assert.strictEqual(publish.scope, "Publish");
-  assert.strictEqual(publish.checked, 15);
-  assert.strictEqual(publish.rows.length, 15);
+  assert.strictEqual(publish.checked, 17);
+  assert.strictEqual(publish.rows.length, 17);
   assert.ok(publish.rows.every((item) => item.scope === "Publish"));
 
   const live = JSON.parse(assertCliSucceeds(script, ["--json", "--scope=Live"]).stdout);
@@ -765,11 +800,11 @@ function testExplainCanaryCliScopeFilter() {
   assert.ok(live.rows.every((item) => item.scope === "Live"));
 
   const publishTable = assertCliSucceeds(script, ["--table", "--scope", "Publish"]).stdout;
-  assert.match(publishTable, /Publish\s+\|\sgroups\/sandbox-9876500001\/AGENTS\.md\s+\|\sscanned\s+\|\s-/);
+  assert.match(publishTable, /Publish\s+\|\sgroups\/sandbox-123456789\/AGENTS\.md\s+\|\sscanned\s+\|\s-/);
   assert.doesNotMatch(publishTable, /Live\s+\|/);
 
   const liveTable = assertCliSucceeds(script, ["--table", "--scope=Live"]).stdout;
-  assert.match(liveTable, /Live\s+\|\sgroups\/sandbox-9876500001\/memory\s+\|\sscanned\s+\|\s-/);
+  assert.match(liveTable, /Live\s+\|\sgroups\/sandbox-123456789\/memory\s+\|\sscanned\s+\|\s-/);
   assert.doesNotMatch(liveTable, /Publish\s+\|/);
 
   assertCliFails(script, ["--scope"], /must be Publish or Live/);

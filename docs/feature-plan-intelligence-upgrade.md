@@ -199,7 +199,7 @@ function safeCall(fn) {
   "version": 1,
   "id": "fb_<ts>_<random>",
   "scope": "group",
-  "scope_id": "9876500001",
+  "scope_id": "123456789",
   "trigger_message_id": "...",
   "reply_message_id": "...",
   "signal_type": "positive",

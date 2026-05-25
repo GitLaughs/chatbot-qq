@@ -1,7 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { formatAcademicArchiveMatches, searchAcademicArchive } = require("./academic-archive");
 const { formatCapabilitySummary } = require("./capabilities");
+const { formatGrowthReport, seedGrowthProposals, workspaceGrowthReport } = require("./growth-loop");
 const { fileStats, formatFileList, formatFileStats, readFileIndex, recentFiles, searchFiles } = require("./file-index");
 const { formatMemoryCandidates, formatMemoryRuleGuide, formatMemoryRuleInspection, inspectMemoryRule, memoryCandidatesFromSamples } = require("./memory-rules");
 const { formatPolicyDrift, scanPolicyDrift } = require("./policy-drift");
@@ -20,6 +22,7 @@ let sharedCommandActive = 0;
 
 const COMMAND_NAMES = [
   "/help", "help", "帮助", "/命令", "命令",
+  "/new", "new", "/新对话", "新对话", "/新话题", "新话题",
   "/概览", "概览", "/工作区", "工作区",
   "/审查包", "审查包",
   "/口径巡检", "口径巡检",
@@ -56,10 +59,11 @@ const COMMAND_NAMES = [
 
 const HELP_ENTRIES = [
   { scope: "all", title: "/help [关键词]", detail: "查看功能；带关键词时搜索命令", tags: ["帮助", "命令", "help"] },
+  { scope: "all", title: "/new", detail: "新建当前聊天的 cc-connect 对话；代理只转发控制命令，不交给 Codex", tags: ["new", "新对话", "新话题", "会话", "上下文"] },
   { scope: "all", title: "/概览", detail: "查看当前 workspace 的记忆、待办、文件和错误概览；/工作区 体检", tags: ["概览", "工作区", "状态", "体检"] },
   { scope: "all", title: "/审查包", detail: "生成当前 workspace 子 agent 审查上下文包", tags: ["审查", "agent", "迭代", "上下文"] },
   { scope: "all", title: "/口径巡检", detail: "扫描文档和审计脚本中的架构/隐私边界漂移", tags: ["口径", "巡检", "文档", "边界"] },
-  { scope: "all", title: "/status", detail: "查看 OneBot、cc-connect、队列、画图、触发模式和能力快照", tags: ["状态", "连接", "队列", "模式", "能力", "provider"] },
+  { scope: "all", title: "/status", detail: "查看 OneBot、cc-connect、队列、画图、触发模式、课表 OCR 和能力快照", tags: ["状态", "连接", "队列", "模式", "能力", "provider", "OCR", "课表"] },
   { scope: "all", title: "/status index", detail: "查看共享索引状态", tags: ["状态", "索引", "共享"] },
   { scope: "all", title: "/files find 关键词", detail: "查共享文件索引", tags: ["文件", "共享", "索引"] },
   { scope: "all", title: "/文件", detail: "查看当前 workspace 文件索引、抽取文本和解析统计", tags: ["文件", "状态", "索引", "抽取", "解析"] },
@@ -70,16 +74,21 @@ const HELP_ENTRIES = [
   { scope: "all", title: "/忘记 关键词", detail: "删除画像中匹配的记录", tags: ["记忆", "删除"] },
   { scope: "all", title: "/总结今天", detail: "从当天聊天生成候选记忆；运行期 JSONL 会按阈值自动分片", tags: ["总结", "候选", "记忆", "jsonl", "分片"] },
   { scope: "all", title: "/建议箱", detail: "列自迭代提案；/建议箱 add 标题 | 正文；/提案 导出 [数量|all]", tags: ["建议", "提案", "迭代", "backlog", "导出"] },
+  { scope: "all", title: "/建议箱 体检", detail: "按当前 workspace 的记忆和提案状态给出低风险成长性建议；/建议箱 自检提案 可生成提案", tags: ["建议", "提案", "迭代", "成长", "记忆", "体检"] },
   { scope: "all", title: "/待办", detail: "列待办；/待办 已完成 [数量]；/待办 搜索 关键词；/待办 add 内容；/待办 done 序号|id", tags: ["待办", "todo", "搜索", "已完成"] },
   { scope: "all", title: "/待办 候选", detail: "列待办候选；/待办 应用候选 序号|all", tags: ["待办", "候选"] },
-  { scope: "all", title: "/任务 [task_id]", detail: "查看自然语言任务；支持继续/取消；文件和脚本产物保存到 local_files", tags: ["任务", "自然语言", "状态", "receipt", "local_files"] },
+  { scope: "all", title: "/任务 [task_id]", detail: "查看自然语言任务；支持继续/取消；文件、课程、提醒、学术助手等结果会写入当前 workspace", tags: ["任务", "自然语言", "状态", "receipt", "local_files"] },
+  { scope: "all", title: "提醒我 周五23:59 交数电实验报告", detail: "自然语言创建 DDL/考试/作业提醒；支持提前 1 天、3 小时、30 分钟多次提醒并 @ 发送人", tags: ["提醒", "DDL", "考试", "作业", "提前", "自然语言", "scheduled_reminder"] },
+  { scope: "all", title: "导入课表截图 / 导入课表：周一 08:00 高数 @A101", detail: "自然语言导入课程表；支持截图 OCR、按发送人归属、每日早上 @ 今日课程、课前 20 分钟提醒", tags: ["课程", "课表", "OCR", "截图", "早上", "课前", "course_schedule"] },
+  { scope: "all", title: "找一下上次 FIFO 仿真", detail: "自然语言或 /找文件 检索学术归档；优先定位课程、日期、关键结果和波形/报告路径", tags: ["FIFO", "仿真", "归档", "波形", "找文件", "academic"] },
+  { scope: "all", title: "帮我验算线代矩阵 / 整理实验报告指导", detail: "自然语言学术助手；自动识别题目解析、数学验算、指标调参、已有 netlist、实验报告指导并归档", tags: ["高数", "线代", "矩阵", "验算", "实验报告", "调参", "netlist", "academic_assist"] },
   { scope: "group", title: "/提醒 每周日晚上7点 A B C D 分别拖地、厕所、洗手台、轮休", detail: "创建群轮值提醒；/提醒 列表；/提醒 删除 序号|id", tags: ["提醒", "值日", "轮值", "定时"] },
   { scope: "all", title: "/候选记忆 [关键词]", detail: "查看或筛选待确认记忆；/候选记忆 快照；/候选记忆 对比 sha；/候选记忆 差异 sha；/候选记忆 体检；/候选记忆 分拣", tags: ["候选", "记忆", "搜索", "快照", "对比", "差异", "体检", "分拣"] },
   { scope: "all", title: "/处理候选记忆 应用:1,2 跳过:3", detail: "按同一快照批量应用/跳过候选记忆", tags: ["候选", "记忆", "批处理", "应用", "跳过"] },
   { scope: "all", title: "/应用候选记忆 序号|all", detail: "确认写入候选记忆", tags: ["候选", "记忆", "应用"] },
   { scope: "all", title: "/跳过候选记忆 序号|all", detail: "跳过候选记忆", tags: ["候选", "记忆", "跳过"] },
   { scope: "all", title: "/最近文件", detail: "列当前群/私聊最近归档文件", tags: ["文件", "最近", "归档"] },
-  { scope: "all", title: "/找文件 关键词", detail: "查本群/私聊文件索引", tags: ["文件", "搜索", "索引"] },
+  { scope: "all", title: "/找文件 关键词", detail: "查本群/私聊文件索引；FIFO 仿真、报告、题目解析等会优先查学术归档", tags: ["文件", "搜索", "索引", "归档", "FIFO", "仿真"] },
   { scope: "group", title: "/安静 30分钟", detail: "暂停群内主动回复", tags: ["群", "静默", "模式"] },
   { scope: "group", title: "/恢复", detail: "恢复群内主动回复", tags: ["群", "静默", "恢复"] },
   { scope: "all", title: "/队列", detail: "查看待发送、待回执、画图和监听队列", tags: ["队列", "画图", "监听", "回执"] },
@@ -126,6 +135,12 @@ function createProxyCommands(deps) {
     };
     const help = commandBody(msg, ["/help", "help", "帮助", "/命令", "命令"]);
     if (help !== null) return reply(proxyHelpText(isPrivate, help));
+    const newConversation = commandBody(msg, ["/new", "new", "/新对话", "新对话", "/新话题", "新话题"]);
+    if (newConversation !== null) {
+      const result = deps.resetConversation ? deps.resetConversation(msg) : "已新建对话。";
+      if (result) return reply(result);
+      return;
+    }
     const overview = commandBody(msg, ["/概览", "概览", "/工作区", "工作区"]);
     if (overview !== null) return reply(workspaceCommand(msg, overview));
     const reviewPacket = commandBody(msg, ["/审查包", "审查包"]);
@@ -450,6 +465,18 @@ function createProxyCommands(deps) {
     }
     if (/^(状态|stats|status)$/i.test(text)) {
       return formatProposalStats(proposalStats({ workspace }));
+    }
+    if (/^(体检|自检|doctor|growth)$/i.test(text)) {
+      return deps.maskSensitive(formatGrowthReport(workspaceGrowthReport({ workspace })));
+    }
+    if (/^(生成体检提案|自检提案|seed|seed-growth)$/i.test(text)) {
+      return deps.maskSensitive(formatGrowthReport(seedGrowthProposals({
+        workspace,
+        scope,
+        scopeID,
+        userID: String(msg.user_id || ""),
+        sourceMessageID: msg.message_id || ""
+      })));
     }
     if (/^(本轮|round|next)$/i.test(text)) {
       return deps.maskSensitive(formatRoundProposal(pickProposalForRound({ workspace })));
@@ -933,7 +960,11 @@ function createProxyCommands(deps) {
     const groups = [
       {
         name: "常用",
-        titles: ["/help [关键词]", "/概览", "/status", "/队列"]
+        titles: ["/help [关键词]", "/new", "/概览", "/status", "/队列"]
+      },
+      {
+        name: "自然语言任务",
+        titles: ["提醒我 周五23:59 交数电实验报告", "导入课表截图 / 导入课表：周一 08:00 高数 @A101", "找一下上次 FIFO 仿真", "帮我验算线代矩阵 / 整理实验报告指导"]
       },
       {
         name: "记忆和画像",
@@ -957,7 +988,7 @@ function createProxyCommands(deps) {
     const byTitle = new Map(visible.map((entry) => [entry.title, entry]));
     const lines = [
       `QQ Bot 帮助（${isPrivate ? "私聊" : "群聊"}）`,
-      "可用命令",
+      "可用入口",
       "━━━━━━━━━━━━"
     ];
     for (const group of groups) {
@@ -967,8 +998,8 @@ function createProxyCommands(deps) {
       lines.push(...entries.map(formatHelpEntry));
     }
     lines.push("━━━━━━━━━━━━");
-    lines.push("查命令：/help 关键词 或 /命令 关键词；例：/help 文件、/help 待办");
-    return lines.join("\n").slice(0, 1800);
+    lines.push("查入口：/help 关键词 或 /命令 关键词；例：/help 课表、/help DDL、/help FIFO");
+    return lines.join("\n").slice(0, 2600);
   }
 
   function formatHelpSearch(query, entries) {
@@ -1221,6 +1252,10 @@ function createProxyCommands(deps) {
     const keyword = String(query || "").trim().toLowerCase();
     if (!keyword) return "用法：/找文件 关键词";
     const workspace = msg.message_type === "group" ? deps.workspaceForGroup(msg.group_id) : deps.workspaceForPrivateUser(msg.user_id);
+    const archived = searchAcademicArchive({ workspace, query: keyword, limit: 5 });
+    if (archived.length > 0) {
+      return formatAcademicArchiveMatches(archived, query);
+    }
     const indexed = searchFiles({ workspace, query: keyword, limit: 8 });
     if (indexed.length > 0) {
       return formatFileList(indexed, "找到这些文件");
@@ -1307,6 +1342,7 @@ function createProxyCommands(deps) {
         "管理员命令：",
         "/admin status：查看根目录、允许列表、管理员列表、队列",
         "/admin capabilities：查看能力快照",
+        "/admin plugins：查看插件；show/enable/disable/set/reload 管理插件",
         "/admin errors：查看结构化错误",
         "/admin routes：查看路由",
         "/admin workspace：查看执行目录和记忆目录",
@@ -1330,6 +1366,117 @@ function createProxyCommands(deps) {
     }
     if (/^capabilities|能力$/i.test(text)) {
       return formatCapabilitySummary(deps.capabilitySnapshot && deps.capabilitySnapshot()).join("\n");
+    }
+    const pluginsMatch = text.match(/^(?:plugins|插件)(?:\s+(.+))?$/i);
+    if (pluginsMatch) {
+      return adminPluginsCommand(String(pluginsMatch[1] || "").trim());
+    }
+    function adminPluginsCommand(body) {
+      if (/^reload|重载$/i.test(body || "")) {
+        if (!deps.reloadPlugins) return "未配置插件重载。";
+        return formatPluginSnapshot(deps.reloadPlugins(), "插件配置已重载");
+      }
+      const reloadOneMatch = body.match(/^(?:reload|重载)\s+(\S+)$/i);
+      if (reloadOneMatch) {
+        if (!deps.reloadPlugins) return "未配置插件重载。";
+        const snapshot = deps.reloadPlugins();
+        return formatPluginDetail(snapshot, reloadOneMatch[1], "插件已重载");
+      }
+      const healthMatch = body.match(/^(?:health|健康)(?:\s+(\S+))?$/i);
+      if (healthMatch) {
+        try {
+          const snapshot = deps.checkPluginHealth ? deps.checkPluginHealth(healthMatch[1] || "") : (deps.pluginSnapshot && deps.pluginSnapshot());
+          return formatPluginHealth(snapshot, healthMatch[1]);
+        } catch (err) {
+          return `插件健康检查失败：${err.message}`;
+        }
+      }
+      const errorsMatch = body.match(/^(?:errors|错误)(?:\s+(\S+))?$/i);
+      if (errorsMatch) {
+        return formatPluginErrors(deps.pluginSnapshot && deps.pluginSnapshot(), errorsMatch[1]);
+      }
+      const configMatch = body.match(/^(?:config|配置)\s+(\S+)$/i);
+      if (configMatch) {
+        return formatPluginConfig(deps.pluginSnapshot && deps.pluginSnapshot(), configMatch[1]);
+      }
+      const testMatch = body.match(/^(?:test|测试)\s+(\S+)$/i);
+      if (testMatch) {
+        if (!deps.testPlugin) return "未配置插件测试。";
+        try {
+          return [`插件测试：${testMatch[1]}`, deps.testPlugin(testMatch[1]) || "无输出"].join("\n").slice(0, 1800);
+        } catch (err) {
+          return `插件测试失败：${err.message}`;
+        }
+      }
+      const showMatch = body.match(/^show\s+(\S+)$/i) || body.match(/^查看\s+(\S+)$/);
+      if (showMatch) {
+        return formatPluginDetail(deps.pluginSnapshot && deps.pluginSnapshot(), showMatch[1]);
+      }
+      const enableScopedMatch = body.match(/^(?:enable|启用)\s+(\S+)\s+(group|private|群|私聊)\s+(\S+)$/i);
+      if (enableScopedMatch) {
+        if (!deps.setPluginScopedEnabled) return "未配置插件范围启用。";
+        try {
+          return formatPluginDetail({ plugins: [deps.setPluginScopedEnabled(enableScopedMatch[1], enableScopedMatch[2], enableScopedMatch[3], true)] }, enableScopedMatch[1], "插件范围已启用");
+        } catch (err) {
+          return `插件范围启用失败：${err.message}`;
+        }
+      }
+      const enableMatch = body.match(/^(?:enable|启用)\s+(\S+)$/i);
+      if (enableMatch) {
+        if (!deps.enablePlugin) return "未配置插件启用。";
+        try {
+          return formatPluginDetail({ plugins: [deps.enablePlugin(enableMatch[1])] }, enableMatch[1], "插件已启用");
+        } catch (err) {
+          return `插件启用失败：${err.message}`;
+        }
+      }
+      const disableScopedMatch = body.match(/^(?:disable|关闭|禁用)\s+(\S+)\s+(group|private|群|私聊)\s+(\S+)$/i);
+      if (disableScopedMatch) {
+        if (!deps.setPluginScopedEnabled) return "未配置插件范围关闭。";
+        try {
+          return formatPluginDetail({ plugins: [deps.setPluginScopedEnabled(disableScopedMatch[1], disableScopedMatch[2], disableScopedMatch[3], false)] }, disableScopedMatch[1], "插件范围已关闭");
+        } catch (err) {
+          return `插件范围关闭失败：${err.message}`;
+        }
+      }
+      const disableMatch = body.match(/^(?:disable|关闭|禁用)\s+(\S+)$/i);
+      if (disableMatch) {
+        if (!deps.disablePlugin) return "未配置插件关闭。";
+        try {
+          return formatPluginDetail({ plugins: [deps.disablePlugin(disableMatch[1])] }, disableMatch[1], "插件已关闭");
+        } catch (err) {
+          return `插件关闭失败：${err.message}`;
+        }
+      }
+      const setMatch = body.match(/^(?:set|设置)\s+(\S+)\s+([a-zA-Z0-9_.-]+)\s+(.+)$/);
+      if (setMatch) {
+        if (!deps.setPluginSetting) return "未配置插件设置。";
+        try {
+          return formatPluginDetail({ plugins: [deps.setPluginSetting(setMatch[1], setMatch[2], setMatch[3])] }, setMatch[1], "插件参数已更新");
+        } catch (err) {
+          return `插件参数更新失败：${err.message}`;
+        }
+      }
+      if (body) {
+        return [
+          "用法：",
+          "/admin plugins",
+          "/admin plugins show <id>",
+          "/admin plugins health [id]",
+          "/admin plugins errors [id]",
+          "/admin plugins config <id>",
+          "/admin plugins test <id>",
+          "/admin plugins enable <id>",
+          "/admin plugins enable <id> group <gid>",
+          "/admin plugins enable <id> private <uid>",
+          "/admin plugins disable <id>",
+          "/admin plugins disable <id> group <gid>",
+          "/admin plugins disable <id> private <uid>",
+          "/admin plugins set <id> <key> <value>",
+          "/admin plugins reload [id]"
+        ].join("\n");
+      }
+      return formatPluginSnapshot(deps.pluginSnapshot && deps.pluginSnapshot(), "插件");
     }
     if (/^routes|路由$/i.test(text)) {
       const groupRoutes = deps.groupRoutes ? [...deps.groupRoutes.entries()].map(([groupID, route]) => `${groupID}:${route.listenPort || ""}:${route.atPort}`).join(",") : "";
@@ -1499,6 +1646,101 @@ function collectFileIndexMatches(workspace, keyword, out) {
       out.push(line.replace(/^\s*[-*]\s*/, "").trim());
     }
   }
+}
+
+function formatPluginSnapshot(snapshot, title = "插件") {
+  if (!snapshot || !Array.isArray(snapshot.plugins)) {
+    return `${title}：暂无插件快照。`;
+  }
+  const lines = [`${title}：`];
+  for (const item of snapshot.plugins) {
+    const settings = item.settings && Object.keys(item.settings).length
+      ? `；参数 ${Object.keys(item.settings).join(",")}`
+      : "";
+    lines.push(`- ${item.id}: ${item.enabled ? "启用" : "关闭"}${settings}`);
+  }
+  return lines.join("\n");
+}
+
+function formatPluginDetail(snapshot, id, title = "插件") {
+  const item = snapshot && Array.isArray(snapshot.plugins)
+    ? snapshot.plugins.find((row) => String(row.id) === String(id))
+    : null;
+  if (!item) {
+    return `${title}：未找到插件 ${id}`;
+  }
+  const lines = [
+    `${title}：${item.id}`,
+    `状态：${item.enabled ? "启用" : "关闭"}`,
+    `名称：${item.title || item.id}`,
+    `版本：${item.version || "-"}`,
+    `API：${item.api_version || "-"}；最低主机：${item.min_host_version || "-"}`,
+    `范围：${item.scope || "-"}`,
+    `权限：${(item.permissions || []).join(",") || "无"}`,
+    `hooks：${(item.hooks || []).join(",") || "无"}`,
+  ];
+  if (item.health) {
+    lines.push(`健康：${item.health.status || (item.health.ok ? "ok" : "unknown")}；连续失败 ${item.health.consecutive_failures || 0}`);
+  }
+  const settings = item.settings || {};
+  const settingRows = Object.keys(settings).map((key) => `${key}=${JSON.stringify(settings[key])}`);
+  lines.push(`参数：${settingRows.join("；") || "无"}`);
+  if (item.errors && item.errors.length) {
+    lines.push(`错误：${item.errors.join("；")}`);
+  }
+  return lines.join("\n");
+}
+
+function formatPluginHealth(snapshot, id = "") {
+  if (!snapshot || !Array.isArray(snapshot.plugins)) {
+    return "插件健康：暂无插件快照。";
+  }
+  const plugins = id ? snapshot.plugins.filter((row) => String(row.id) === String(id)) : snapshot.plugins;
+  if (plugins.length === 0) {
+    return `插件健康：未找到插件 ${id}`;
+  }
+  return [
+    "插件健康：",
+    ...plugins.map((item) => {
+      const health = item.health || {};
+      return `- ${item.id}: ${health.status || (health.ok ? "ok" : "unknown")}；连续失败 ${health.consecutive_failures || 0}；错误 ${health.error_count || 0}`;
+    }),
+  ].join("\n");
+}
+
+function formatPluginErrors(snapshot, id = "") {
+  if (!snapshot || !Array.isArray(snapshot.plugins)) {
+    return "插件错误：暂无插件快照。";
+  }
+  const plugins = id ? snapshot.plugins.filter((row) => String(row.id) === String(id)) : snapshot.plugins;
+  if (plugins.length === 0) {
+    return `插件错误：未找到插件 ${id}`;
+  }
+  const lines = ["插件错误："];
+  for (const item of plugins) {
+    const health = item.health || {};
+    const rows = [
+      ...(item.errors || []),
+      health.last_error ? `${health.last_error_at || "-"} ${health.last_error}` : "",
+    ].filter(Boolean);
+    lines.push(`- ${item.id}: ${rows.join("；") || "无"}`);
+  }
+  return lines.join("\n");
+}
+
+function formatPluginConfig(snapshot, id) {
+  const item = snapshot && Array.isArray(snapshot.plugins)
+    ? snapshot.plugins.find((row) => String(row.id) === String(id))
+    : null;
+  if (!item) {
+    return `插件配置：未找到插件 ${id}`;
+  }
+  return [
+    `插件配置：${item.id}`,
+    `settings=${JSON.stringify(item.settings || {})}`,
+    `groups=${JSON.stringify(item.groups || null)}`,
+    `private_users=${JSON.stringify(item.private_users || null)}`,
+  ].join("\n");
 }
 
 function helpHaystack(entry) {

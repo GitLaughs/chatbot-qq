@@ -1,5 +1,5 @@
 param(
-    [string]$Server = "root@example.com",
+    [string]$Server = "root@43.108.37.203",
     [string]$LocalBackupDir = "C:\chatbot-qq\backup\server-daily",
     [switch]$RawHealth,
     [switch]$IncludeLogs

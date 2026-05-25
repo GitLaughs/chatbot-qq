@@ -181,7 +181,7 @@ function prioritizedMissing(missing = []) {
 
 function questionForField(field) {
   const questions = {
-    current_assignments: "我已经识别到这是“每周值日提醒”，还缺本周每个人对应的任务。请按“QQ号 任务”发给我，例如：1234500001 洗手台，1234500006 拖地。",
+    current_assignments: "我已经识别到这是“每周值日提醒”，还缺本周每个人对应的任务。请按“QQ号 任务”发给我，例如：100000001 洗手台，100000006 拖地。",
     tasks: "我已经识别到这是“每周值日提醒”，还缺值日顺序。请发轮换顺序，例如：洗手台、拖地、厕所、轮休。",
     time: "我已经识别到这是“每周值日提醒”，还缺提醒时间。你要每周几几点发？",
     day_of_week: "我已经识别到这是“每周值日提醒”，还缺每周几提醒。你要周几发？",

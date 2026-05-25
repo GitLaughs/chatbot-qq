@@ -1,0 +1,34 @@
+{
+  "id": "image",
+  "title": "画图",
+  "version": "1.0.0",
+  "api_version": "1",
+  "min_host_version": "0.2.18",
+  "description": "QQ image generation command plugin.",
+  "homepage": "docs/plugin-platform.md",
+  "repository": "local",
+  "keywords": ["image", "generation", "qq"],
+  "license": "UNLICENSED",
+  "priority": 80,
+  "default_enabled": true,
+  "scope": "both",
+  "permissions": {
+    "required": ["send_message", "exec_command"],
+    "optional": []
+  },
+  "hooks": ["onMessage", "health", "capabilities"],
+  "default_settings": {
+    "triggers": ["/画图", "/生图", "/img", "画图", "生图"],
+    "max_concurrent_per_group": 2,
+    "queue_max_per_group": 20
+  },
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "triggers": { "type": "array", "items": { "type": "string" } },
+      "max_concurrent_per_group": { "type": "integer", "minimum": 1, "maximum": 100 },
+      "queue_max_per_group": { "type": "integer", "minimum": 0, "maximum": 1000 }
+    },
+    "additionalProperties": false
+  }
+}

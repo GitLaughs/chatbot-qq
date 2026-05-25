@@ -74,8 +74,8 @@ function formatTable(explanation) {
 
 function printHelp() {
   process.stdout.write([
-    "Usage: node scripts/explain-route-scope.js --message-type private --user-id 1234500001 [--operation chat|execute|memory] [--table]",
-    "       node scripts/explain-route-scope.js --message-type group --group-id 9876500001 [--operation chat|execute|memory] [--table]",
+    "Usage: node scripts/explain-route-scope.js --message-type private --user-id 100000001 [--operation chat|execute|memory] [--table]",
+    "       node scripts/explain-route-scope.js --message-type group --group-id 123456789 [--operation chat|execute|memory] [--table]",
     "",
     "Explains QQ route scope without reading message content or private data."
   ].join("\n") + "\n");

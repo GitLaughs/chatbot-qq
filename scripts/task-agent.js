@@ -32,10 +32,26 @@ const TASK_SCHEMAS = {
       task_type: { type: "string", enum: ["scheduled_reminder"] },
       "schedule.type": { type: "string", enum: ["daily", "weekly", "once"] },
       "schedule.time": { type: "string", pattern: /^([01]\d|2[0-3]):[0-5]\d$/ },
+      "schedule.date": { type: "string", pattern: /^\d{4}-\d{2}-\d{2}$/, optional: true, nullable: true },
       "schedule.day_of_week": { type: "number", min: 0, max: 6, optional: true, nullable: true },
       "schedule.timezone": { type: "string", optional: true },
       message: { type: "string" },
       "notify.mention_user": { type: "string", pattern: /^\d+$/, optional: true, nullable: true },
+      "notify.lead_minutes": { type: "array", optional: true },
+    },
+  },
+  course_schedule: {
+    required: ["task_type", "owner_user_id", "entries"],
+    fields: {
+      task_type: { type: "string", enum: ["course_schedule"] },
+      owner_user_id: { type: "string", pattern: /^\d+$/ },
+      title: { type: "string", optional: true },
+      morning_enabled: { type: "boolean", optional: true },
+      morning_time: { type: "string", pattern: /^([01]\d|2[0-3]):[0-5]\d$/, optional: true },
+      reminder_minutes_before: { type: "number", min: 1, max: 1440, optional: true },
+      entries: { type: "array", minItems: 1 },
+      source_type: { type: "string", optional: true },
+      source_images: { type: "array", optional: true },
     },
   },
   file_modify_and_return: {
@@ -58,6 +74,36 @@ const TASK_SCHEMAS = {
       output_path: { type: "string" },
       run_after_create: { type: "boolean" },
       checks: { type: "array" },
+    },
+  },
+  vivado_simulation: {
+    required: ["task_type", "goal", "outputs"],
+    fields: {
+      task_type: { type: "string", enum: ["vivado_simulation"] },
+      goal: { type: "string" },
+      workspace_hint: { type: "string", nullable: true },
+      top_module: { type: "string", nullable: true },
+      testbench: { type: "string", nullable: true },
+      sources: { type: "array" },
+      outputs: { type: "array" },
+      run_mode: { type: "string", enum: ["batch", "project", "unknown"], optional: true, nullable: true },
+      "constraints.require_png": { type: "boolean", optional: true },
+      "constraints.require_vcd": { type: "boolean", optional: true },
+      "constraints.require_wdb": { type: "boolean", optional: true },
+      "constraints.return_source": { type: "boolean", optional: true },
+    },
+  },
+  academic_assist: {
+    required: ["task_type", "category", "request"],
+    fields: {
+      task_type: { type: "string", enum: ["academic_assist"] },
+      category: { type: "string", enum: ["problem_analysis", "math_verification", "report_guidance", "tuning", "netlist", "simulation", "unknown"] },
+      course: { type: "string", optional: true },
+      topic: { type: "string", optional: true },
+      request: { type: "string" },
+      artifacts: { type: "array", optional: true },
+      data: { type: "object", optional: true },
+      expected_output: { type: "string", optional: true },
     },
   },
   deploy_or_restart: {
@@ -91,11 +137,20 @@ function parseTaskWithModel(message, taskType, options = {}) {
   if (taskType === "scheduled_reminder") {
     return normalizeModelResult(parseScheduledReminderHeuristic(message, options), taskType);
   }
+  if (taskType === "course_schedule") {
+    return normalizeModelResult(parseCourseScheduleHeuristic(message, options), taskType);
+  }
   if (taskType === "file_modify_and_return") {
     return normalizeModelResult(parseFileModifyHeuristic(message), taskType);
   }
   if (taskType === "script_create_and_run") {
     return normalizeModelResult(parseScriptCreateHeuristic(message), taskType);
+  }
+  if (taskType === "vivado_simulation") {
+    return normalizeModelResult(parseVivadoSimulationHeuristic(message), taskType);
+  }
+  if (taskType === "academic_assist") {
+    return normalizeModelResult(parseAcademicAssistHeuristic(message), taskType);
   }
   if (taskType === "deploy_or_restart") {
     return normalizeModelResult(parseDeployHeuristic(message), taskType);
@@ -149,6 +204,7 @@ function buildTaskParseRequest(message, taskType, options = {}) {
     scopeID: options.scopeID,
     groupID: options.groupID,
     userID: options.userID,
+    sourceImages: options.sourceImages,
     timezone: options.timezone || "Asia/Shanghai",
     today: options.today || options.startDate,
   });
@@ -167,6 +223,7 @@ function buildTaskParsePrompt({ message, taskType, schema, context = {} }) {
   return [
     "你是一个 QQ bot 自然语言任务结构化解析器。",
     "只把用户目标解析成 JSON，不要解释、不要执行、不要写代码。",
+    "先审核用户目标；不要把任何请求解析成删除、移动、覆盖、改权限或修改当前聊天 workspace 外文件的任务。",
     "缺失字段用 null，不要猜测；QQ 号必须保留为纯数字字符串；时间使用 HH:MM；星期用 0-6（0=周日）。",
     `任务类型：${taskType}`,
     `上下文：${JSON.stringify(context)}`,
@@ -395,30 +452,122 @@ function parseWeeklyRotaHeuristic(message, options = {}) {
 function parseScheduledReminderHeuristic(message, options = {}) {
   const text = stripAt(String(message || ""));
   const weeklyDay = parseWeekday(text);
-  const scheduleType = weeklyDay === null && /每天|每日|每晚|天天/u.test(text) ? "daily" : (weeklyDay !== null ? "weekly" : "daily");
+  const hasWeeklyCue = /每周|每星期/u.test(text);
+  const hasDailyCue = /每天|每日|每晚|天天/u.test(text);
+  const scheduleType = hasDailyCue ? "daily" : (weeklyDay !== null && hasWeeklyCue ? "weekly" : (weeklyDay !== null ? "once" : "daily"));
+  const time = parseTime(text) || null;
+  const leadMinutes = parseLeadMinutes(text, scheduleType);
   const reminderMessage = cleanReminderMessage(text);
   return {
     task_type: "scheduled_reminder",
     title: titleFromReminder(reminderMessage),
     schedule: {
       type: scheduleType,
-      time: parseTime(text) || null,
+      time,
       timezone: "Asia/Shanghai",
+      date: scheduleType === "once" ? nextDateForWeekday(weeklyDay, time, options) : null,
       day_of_week: weeklyDay,
     },
     message: reminderMessage,
     notify: {
       mention_user: options.userID !== undefined ? String(options.userID) : null,
+      lead_minutes: leadMinutes,
     },
     source_text: text,
   };
 }
 
+function parseCourseScheduleHeuristic(message, options = {}) {
+  const text = String(message || "")
+    .replace(/\[CQ:at,[^\]]+\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const entries = [];
+  const owner = firstMatch(text, /(?:QQ|qq|对象|提醒)\s*[:：=]?\s*(\d{5,12})/u) || (options.userID !== undefined ? String(options.userID) : "");
+  const normalized = text.replace(/\r\n/g, "\n");
+  const linePattern = /(?:周|星期)([日天一二三四五六0-7])\s*([0-2]?\d[:：点][0-5]?\d)(?:\s*[-~到至]\s*([0-2]?\d[:：点][0-5]?\d))?\s*([^；;\n。]+)/u;
+  for (const segment of normalized.split(/[；;\n。]+/u)) {
+    const match = segment.match(linePattern);
+    if (!match) continue;
+    const coursePart = clean(match[4] || "")
+      .replace(/^(上|有|课程|课)\s*/u, "")
+      .replace(/(?:提前|课前)\s*\d+\s*分钟.*$/u, "")
+      .trim();
+    const parsedCourse = splitCourseLocation(coursePart);
+    entries.push({
+      day_of_week: WEEKDAY.get(match[1]),
+      start_time: parseClock(match[2]),
+      end_time: parseClock(match[3]),
+      course: parsedCourse.course,
+      location: parsedCourse.location,
+      reminder_minutes_before: firstNumber(text, /(?:提前|课前)\s*(\d+)\s*分钟/u) || 20,
+    });
+  }
+  if (entries.length === 0) {
+    const compact = text.match(/(?:周|星期)([日天一二三四五六0-7]).*?([0-2]?\d[:：点][0-5]?\d).*?(高数|线代|数电|模电|英语|体育|物理|概率|课程)/u);
+    if (compact) {
+      entries.push({
+        day_of_week: WEEKDAY.get(compact[1]),
+        start_time: parseClock(compact[2]),
+        course: clean(compact[3]),
+        reminder_minutes_before: 20,
+      });
+    }
+  }
+  const optionImages = normalizeSourceImages(options.sourceImages);
+  const markerImages = optionImages.length > 0 ? [] : extractImageMarkers(text);
+  return {
+    task_type: "course_schedule",
+    title: "课程表",
+    owner_user_id: owner,
+    morning_enabled: !/不(?:要|用).*早上|关闭.*早上/u.test(text),
+    morning_time: parseMorningTime(text) || "07:30",
+    reminder_minutes_before: firstNumber(text, /(?:提前|课前)\s*(\d+)\s*分钟/u) || 20,
+    entries,
+    source_type: /截图|图片|照片|\[图片\]/u.test(text) || optionImages.length > 0 ? "image" : "text",
+    source_images: [...new Set([...markerImages, ...optionImages])].slice(0, 8),
+    source_text: text,
+  };
+}
+
+function splitCourseLocation(value) {
+  const text = clean(value || "");
+  const explicit = text.match(/(.+?)(?:@|在|地点[:：]?)([\p{L}\p{N}_\-楼教室室区A-Za-z]+)$/u);
+  if (explicit) {
+    return { course: clean(explicit[1]), location: clean(explicit[2]) };
+  }
+  const known = text.match(/^(高数|线代|线性代数|数电|数字电路|模电|模拟电路|英语|体育|物理|概率)(?:\s*([\p{L}\p{N}_\-楼教室室区A-Za-z]+))?$/u);
+  if (known && known[2] && /(?:楼|教室|实验|室|区|[A-Za-z]?\d{2,4})/u.test(known[2])) {
+    return { course: clean(known[1]), location: clean(known[2]) };
+  }
+  const trailingRoom = text.match(/^(.+?)\s+([A-Za-z]?\d{2,4}[A-Za-z]?|[\p{L}\p{N}_\-]*楼[\p{L}\p{N}_\-]*)$/u);
+  if (trailingRoom) {
+    return { course: clean(trailingRoom[1]), location: clean(trailingRoom[2]) };
+  }
+  return { course: text, location: "" };
+}
+
+function normalizeSourceImages(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 8);
+}
+
+function extractImageMarkers(text) {
+  const value = String(text || "");
+  const markers = [];
+  for (const match of value.matchAll(/\[CQ:image[^\]]*\]|\[图片\]/giu)) {
+    markers.push(match[0]);
+  }
+  return [...new Set(markers)].slice(0, 8);
+}
+
 function cleanReminderMessage(text) {
   const cleaned = String(text || "")
-    .replace(/^(?:请|麻烦)?(?:每天|每日|每晚|天天|每周[日天一二三四五六0-7]?|周[日天一二三四五六0-7]|星期[日天一二三四五六0-7])?/u, "")
+    .replace(/^(?:请|麻烦)?(?:每天|每日|每晚|天天|每周[日天一二三四五六0-7]?|每星期[日天一二三四五六0-7]?|周[日天一二三四五六0-7]|星期[日天一二三四五六0-7])?/u, "")
     .replace(/(?:上午|早上|中午|下午|晚上|晚)?\s*\d{1,2}(?::|：|点半|点)\s*\d{0,2}\s*分?/gu, "")
+    .replace(/提前\s*(?:\d+\s*(?:天|小时|分钟|分)\s*[、,，和]*)+/gu, "")
     .replace(/^(?:提醒我|提醒|叫我|通知我|通知|记得|别忘了?|要我)\s*/u, "")
+    .replace(/^(?:每天|每日|每晚|天天|每周[日天一二三四五六0-7]?|每星期[日天一二三四五六0-7]?|周[日天一二三四五六0-7]|星期[日天一二三四五六0-7])\s*/u, "")
     .replace(/^(?:我)?(?:检查|查看|处理|做)?\s*/u, "")
     .replace(/[，,。；;：: ]+$/u, "")
     .trim();
@@ -456,6 +605,54 @@ function parseScriptCreateHeuristic(message) {
   };
 }
 
+function parseVivadoSimulationHeuristic(message) {
+  const text = stripAt(String(message || ""));
+  const top = firstMatch(text, /(?:top|顶层|模块)\s*[:：=]?\s*([A-Za-z_][A-Za-z0-9_$]*)/i);
+  const tb = firstMatch(text, /\b(tb_[A-Za-z0-9_$]+)\b/i) || firstMatch(text, /(?:testbench|测试平台)\s*[:：=]?\s*([A-Za-z_][A-Za-z0-9_$]*)/i);
+  const paths = allPathLikes(text);
+  const wantsPng = /png|图片|截图|波形图|报告/iu.test(text);
+  const wantsVcd = /vcd/i.test(text);
+  const wantsWdb = /wdb|波形/u.test(text);
+  const returnSource = /源码|代码|source|回传|上传/u.test(text);
+  const outputs = [];
+  if (wantsPng) outputs.push("png_waveform");
+  if (wantsVcd) outputs.push("vcd");
+  if (wantsWdb) outputs.push("wdb");
+  if (returnSource) outputs.push("source_files");
+  outputs.push("logs", "summary");
+  return {
+    task_type: "vivado_simulation",
+    goal: clean(text) || "运行 Vivado/xsim 仿真并回传结果",
+    workspace_hint: firstWorkspaceHint(text),
+    top_module: top || null,
+    testbench: tb || null,
+    sources: paths,
+    outputs: [...new Set(outputs)],
+    run_mode: /xpr|工程|project/i.test(text) ? "project" : "batch",
+    constraints: {
+      require_png: wantsPng,
+      require_vcd: wantsVcd,
+      require_wdb: wantsWdb,
+      return_source: returnSource,
+    },
+  };
+}
+
+function parseAcademicAssistHeuristic(message) {
+  const text = stripAt(String(message || ""));
+  const category = academicCategory(text);
+  return {
+    task_type: "academic_assist",
+    category,
+    course: academicCourse(text),
+    topic: academicTopic(text),
+    request: clean(text) || null,
+    artifacts: allPathLikes(text),
+    data: {},
+    expected_output: academicExpectedOutput(category),
+  };
+}
+
 function parseDeployHeuristic(message) {
   const text = stripAt(String(message || ""));
   return {
@@ -467,9 +664,67 @@ function parseDeployHeuristic(message) {
   };
 }
 
+function academicCategory(text) {
+  const value = String(text || "");
+  if (/(已有\s*netlist|netlist|\.cir\b|\.sp\b|\.asc\b)/i.test(value)) return "netlist";
+  if (/(实验报告|报告助手|实验要求|数据表|误差分析|报告)/i.test(value) && /(实验|波形|数据|公式|参数|报告)/i.test(value)) return "report_guidance";
+  if (/(指标|调参|参数|优化|增益|带宽|相位裕度|裕量|tuning)/i.test(value)) return "tuning";
+  if (/(验算|代码验证|代码验算|矩阵|行列式|线代|线性代数|高数|det|determinant)/i.test(value)) return "math_verification";
+  if (/(仿真|波形|simulation|vivado|hspice|ltspice)/i.test(value)) return "simulation";
+  if (/(题目|解析|证明|计算|公式)/i.test(value)) return "problem_analysis";
+  return "unknown";
+}
+
+function academicCourse(text) {
+  const value = String(text || "");
+  if (/(数电|数字系统|FIFO|Vivado|xsim|verilog)/i.test(value)) return "数字系统";
+  if (/(模电|模拟电子|HSPICE|LTspice|\.cir\b|\.sp\b|运放|滤波器)/i.test(value)) return "模电";
+  if (/(线代|线性代数|矩阵|行列式|特征值)/i.test(value)) return "线代";
+  if (/(高数|微积分|极限|导数|积分|级数)/i.test(value)) return "高数";
+  if (/(大学物理|物理实验|示波器)/i.test(value)) return "大学物理";
+  return "";
+}
+
+function academicTopic(text) {
+  const value = String(text || "");
+  const match = value.match(/\b(FIFO|FSM|counter|det|netlist)\b/i);
+  if (match) return match[1].toUpperCase() === "DET" ? "行列式" : match[1].toUpperCase();
+  if (/行列式/.test(value)) return "行列式";
+  if (/矩阵/.test(value)) return "矩阵";
+  if (/滤波器/.test(value)) return "滤波器";
+  if (/运放/.test(value)) return "运放";
+  return "";
+}
+
+function academicExpectedOutput(category) {
+  if (category === "math_verification") return "代码验算结论";
+  if (category === "report_guidance") return "实验报告指导";
+  if (category === "tuning") return "调参步骤和验证指标";
+  if (category === "netlist") return "netlist 仿真检查清单";
+  if (category === "simulation") return "波形图和关键结果";
+  return "题目解析和可验算结果";
+}
+
 function firstPathLike(text) {
   const match = String(text || "").match(/(?:[A-Za-z]:\\[^\s"'<>]+|(?:received_files|local_files|\.\/|\.\\)[^\s"'<>]+)/);
   return match ? match[0] : "";
+}
+
+function allPathLikes(text) {
+  const matches = String(text || "").match(/(?:[A-Za-z]:\\[^\s"'<>]+|(?:received_files|local_files|\.\/|\.\\)[^\s"'<>]+|[\w.-]+\.(?:v|sv|xpr|tcl))/gi);
+  return matches ? [...new Set(matches)] : [];
+}
+
+function firstWorkspaceHint(text) {
+  const path = firstPathLike(text);
+  if (path) return path;
+  if (/Verilogexp|数字系统|实验三|实验四|exp3|exp4/i.test(text)) return "user-authorized-hdl-project";
+  return null;
+}
+
+function firstMatch(text, regex) {
+  const match = String(text || "").match(regex);
+  return match ? match[1] : "";
 }
 
 function parseOrderedTasks(text) {
@@ -538,6 +793,81 @@ function parseTime(text) {
   return "";
 }
 
+function parseClock(text) {
+  const value = String(text || "").replace("：", ":").replace("点", ":");
+  const match = value.match(/^([0-2]?\d):([0-5]?\d)$/);
+  if (!match) return "";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function parseMorningTime(text) {
+  const match = String(text || "").match(/(?:早上|每天早上|上午)\s*([0-2]?\d[:：点][0-5]?\d)/u);
+  return match ? parseClock(match[1]) : "";
+}
+
+function firstNumber(text, regex) {
+  const match = String(text || "").match(regex);
+  return match ? Number(match[1]) : null;
+}
+
+function parseLeadMinutes(text, scheduleType) {
+  const source = String(text || "");
+  const out = [];
+  const re = /(\d+)\s*(天|小时|分钟|分)/gu;
+  const leadSection = firstMatch(source, /提前\s*([^，。；;]+)/u) || (/提前/u.test(source) ? source : "");
+  for (const match of String(leadSection || "").matchAll(re)) {
+    const n = Number(match[1]);
+    const unit = match[2];
+    if (!Number.isFinite(n) || n <= 0) continue;
+    if (unit === "天") out.push(n * 1440);
+    else if (unit === "小时") out.push(n * 60);
+    else out.push(n);
+  }
+  if (out.length) return uniqueNumbers(out);
+  if (scheduleType === "once" && /ddl|DDL|截止|考试|交/u.test(source)) {
+    return [1440, 180, 30];
+  }
+  return [];
+}
+
+function uniqueNumbers(items) {
+  return [...new Set(items.map(Number).filter((n) => Number.isInteger(n) && n > 0))].sort((a, b) => b - a);
+}
+
+function nextDateForWeekday(day, time, options = {}) {
+  if (!Number.isInteger(day)) return null;
+  const base = localDateFromOptions(options);
+  let delta = (day - base.getDay() + 7) % 7;
+  if (delta === 0 && time) {
+    const [hour, minute] = String(time).split(":").map(Number);
+    if (Number.isInteger(hour) && Number.isInteger(minute)) {
+      const sameDay = new Date(base);
+      sameDay.setHours(hour, minute, 0, 0);
+      if (sameDay.getTime() <= base.getTime()) {
+        delta = 7;
+      }
+    }
+  }
+  const next = new Date(base);
+  next.setDate(base.getDate() + delta);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+}
+
+function localDateFromOptions(options = {}) {
+  const raw = options.today || options.startDate || "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(raw))) {
+    return new Date(`${raw}T00:00:00`);
+  }
+  const parsed = raw ? new Date(raw) : new Date();
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed;
+  }
+  return new Date();
+}
+
 function splitList(text) {
   return uniqueList(String(text || "")
     .split(/[、,，;；\s]+/)
@@ -584,6 +914,7 @@ module.exports = {
   buildTaskParseRequest,
   normalizeModelResult,
   parseTaskWithModel,
+  parseCourseScheduleHeuristic,
   parseTaskWithCommand,
   parseWeeklyRotaHeuristic,
   schemaForPrompt,

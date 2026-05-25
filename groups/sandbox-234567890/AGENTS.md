@@ -1,10 +1,10 @@
-# AGENTS.md - QQ 群沙箱 987650002
+# AGENTS.md - QQ 群沙箱 234567890
 
-This workspace backs the QQ sandbox group `987650002`.
+This workspace backs the QQ sandbox group `234567890`.
 
 Rules:
 
-- Only handle messages from QQ sandbox group `987650002`. Messages from any other group must never reach this workspace; if they do, respond with nothing and report a routing bug.
+- Only handle messages from QQ sandbox group `234567890`. Messages from any other group must never reach this workspace; if they do, respond with nothing and report a routing bug.
 - Do not mix files, memory, or member notes from other groups into this directory.
 - QQ numbers, user IDs, and group IDs are routing metadata in this self-use bot, not secrets by themselves.
 - Treat cookies, tokens, provider keys, private chat content, private logs, chat exports, and private memory files as sensitive.

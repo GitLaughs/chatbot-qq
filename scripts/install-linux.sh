@@ -156,8 +156,8 @@ type = "codex"
 [projects.agent.options]
 work_dir = "$workspace"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"
@@ -184,8 +184,8 @@ type = "codex"
 [projects.agent.options]
 work_dir = "$private_workspace"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"

@@ -1,4 +1,4 @@
-You are running `/dream` for the QQ group workspace `C:\chatbot-qq\groups\sandbox-987650002`.
+You are running `/dream` for the QQ group workspace `C:\chatbot-qq\groups\sandbox-234567890`.
 
 Purpose: run a deliberate memory-maintenance pass for this QQ group: orient, gather, consolidate, prune, and report.
 
@@ -41,6 +41,8 @@ Workflow:
 3. Consolidate
    - Add durable facts, decisions, and useful group state into `KNOWLEDGE.md`.
    - Add raw notes or a dream log into `memory/YYYY-MM-DD.md`.
+   - If chat evidence shows the bot's local voice should adapt, update `memory/bot-style.md` with short notes about tone, humor, callbacks, reply length, and when to stay quiet.
+   - Bot style may evolve like a long-term group participant, but do not invent a fake human identity or offline experiences.
    - If helpful, create a detailed report under `memory/dreams/YYYY-MM-DD-HHMMSS.md`.
    - Keep updates concise. Do not duplicate facts already stated well.
    - For bot implementation ideas, write only review notes, deterministic rule suggestions, candidate patches, and test suggestions. Do not edit production source files from this pass.

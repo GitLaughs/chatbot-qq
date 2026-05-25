@@ -49,12 +49,15 @@ __pycache__/
 users/
 groups/*/members/
 groups/*/memory/
+groups/*/.cc-connect/
 groups/*/local_files/
 groups/*/files/
 groups/*/GROUP_PROFILE.md
 groups/*/PROFILE.md
 groups/*/INSTRUCTIONS.md
 groups/*/KNOWLEDGE.md
+groups/*/[ ]*
+local_files/
 chatbot-qq-qrcode.png
 
 # === Platform-specific ===

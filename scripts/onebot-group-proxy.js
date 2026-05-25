@@ -5,12 +5,15 @@ const { createHealthSnapshot, startHealthServer } = require("./lib/proxy-health"
 const { loadProxyState, saveProxyState } = require("./lib/proxy-state");
 const { createProxyCommands } = require("./lib/proxy-commands");
 const { createProxyFiles } = require("./lib/proxy-files");
+const { createPluginManager } = require("./lib/plugin-manager");
 const { appendRecentError, readRecentErrors } = require("./lib/recent-errors");
+const { archiveAcademicTaskResult, formatAcademicArchiveMatches, looksLikeAcademicSearch, searchAcademicArchive } = require("./lib/academic-archive");
 const { createCapabilitySnapshot, readCapabilitySnapshot, writeCapabilitySnapshot } = require("./lib/capabilities");
-const { addFileIndex } = require("./lib/file-index");
+const { addFileIndex, recentFiles } = require("./lib/file-index");
 const { resolveReadableFilePath } = require("./lib/napcat-paths");
 const { buildTaskAgentContext, preparedFileTaskParse } = require("./lib/task-agent-context");
 const { createTaskRequest, findAwaitingInputTask, findTaskRequestByID, findTaskRequestsByMessage, readTaskReceipt, updateTaskRequest, writeTaskReceipt } = require("./lib/task-request-store");
+const { dueCourseNotifications } = require("./lib/course-scheduler");
 const { dueReminders } = require("./lib/reminder-scheduler");
 const { dueRotas, formatRotaCreated, parseRotaRequest } = require("./lib/rota-scheduler");
 const { continuePendingRotaTask, startPendingRotaTask } = require("./lib/rota-followup");
@@ -18,6 +21,7 @@ const { executeNaturalTask } = require("./lib/task-agent-pipeline");
 const { createRotaFromText, formatRotaFallbackFailure } = require("./lib/rota-task-fallback");
 const { classifyTask, looksLikeWeeklyRota } = require("./lib/task-intent-router");
 const { runScriptTaskChecks } = require("./lib/script-task-checker");
+const { evaluatePromptInjectionRisk } = require("./lib/prompt-injection-guard");
 const { parseTaskWithModel } = require("./task-agent");
 const { maskSensitive, redactSecrets } = require("./lib/sensitive-redaction");
 const { trackActivity, detectGap, buildContinuityContext, buildReplyChainContext, replyChainMessageIDs, activitySnapshot } = require("./lib/conversation-context");
@@ -47,7 +51,7 @@ try {
   WebSocket = require(wsPath);
 }
 
-const ADMIN_ROOT_USERS = (process.env.ONEBOT_ADMIN_ROOT_USERS || "1234500001")
+const ADMIN_ROOT_USERS = (process.env.ONEBOT_ADMIN_ROOT_USERS || "100000001")
   .split(",")
   .map((p) => Number(p.trim()))
   .filter(Boolean);
@@ -56,11 +60,11 @@ const LISTEN_PORTS = (process.env.ONEBOT_PROXY_PORTS || process.env.ONEBOT_PROXY
   .map((p) => Number(p.trim()))
   .filter(Boolean);
 const UPSTREAM_URL = process.env.ONEBOT_UPSTREAM_URL || "ws://127.0.0.1:3001";
-const ALLOWED_GROUPS = (process.env.ONEBOT_ALLOWED_GROUPS || process.env.ONEBOT_ALLOWED_GROUP || "9876500001,987650002")
+const ALLOWED_GROUPS = (process.env.ONEBOT_ALLOWED_GROUPS || process.env.ONEBOT_ALLOWED_GROUP || "123456789,234567890")
   .split(",")
   .map((p) => Number(p.trim()))
   .filter(Boolean);
-const ALLOWED_PRIVATE_USERS = (process.env.ONEBOT_ALLOWED_PRIVATE_USERS || "1234500002,1234500003,1234500004,1234500005,1234500001")
+const ALLOWED_PRIVATE_USERS = (process.env.ONEBOT_ALLOWED_PRIVATE_USERS || "100000002,100000003,100000004,100000005,100000001")
   .split(",")
   .map((p) => Number(p.trim()))
   .filter(Boolean);
@@ -72,7 +76,11 @@ const ADMIN_POKE_ACK_USERS = (process.env.ONEBOT_ADMIN_POKE_ACK_USERS || ADMIN_R
   .split(",")
   .map((p) => Number(p.trim()))
   .filter(Boolean);
-const AT_ONLY_GROUPS = (process.env.ONEBOT_AT_ONLY_GROUPS || "987650002")
+const AT_ONLY_GROUPS = (process.env.ONEBOT_AT_ONLY_GROUPS || "234567890")
+  .split(",")
+  .map((p) => Number(p.trim()))
+  .filter(Boolean);
+const SILENT_FILE_GROUPS = (process.env.ONEBOT_SILENT_FILE_GROUPS || ALLOWED_GROUPS.join(","))
   .split(",")
   .map((p) => Number(p.trim()))
   .filter(Boolean);
@@ -82,6 +90,7 @@ const MINIMAL_LISTEN_GROUPS = (process.env.ONEBOT_MINIMAL_LISTEN_GROUPS || "")
   .filter(Boolean);
 const LISTEN_PORT = Number(process.env.ONEBOT_LISTEN_PORT || 3002);
 const AT_PORT = Number(process.env.ONEBOT_AT_PORT || 3003);
+const VIVADO_TASK_PORT = Number(process.env.ONEBOT_VIVADO_TASK_PORT || process.env.ONEBOT_HEAVY_TASK_PORT || 0);
 const GROUP_ROUTES = parseGroupRoutes(process.env.ONEBOT_GROUP_ROUTES);
 const PRIVATE_ROUTES = parsePrivateRoutes(process.env.ONEBOT_PRIVATE_ROUTES);
 const ACK_EMOJI_ID = String(process.env.ONEBOT_ACK_EMOJI_ID || "76");
@@ -156,8 +165,10 @@ const PROACTIVE_CHECKIN_HOURS = Math.max(1, Number(process.env.ONEBOT_PROACTIVE_
 const PROACTIVE_CHECKIN_INTERVAL_MS = Math.max(300000, Number(process.env.ONEBOT_PROACTIVE_CHECKIN_INTERVAL_MS || 1800000));
 const ROTA_CHECK_INTERVAL_MS = Math.max(10000, Number(process.env.ONEBOT_ROTA_CHECK_INTERVAL_MS || 60000));
 const REMINDER_CHECK_INTERVAL_MS = Math.max(10000, Number(process.env.ONEBOT_REMINDER_CHECK_INTERVAL_MS || 60000));
+const COURSE_CHECK_INTERVAL_MS = Math.max(10000, Number(process.env.ONEBOT_COURSE_CHECK_INTERVAL_MS || REMINDER_CHECK_INTERVAL_MS));
 const ENRICH_CONTEXT_MAX_CHARS = Math.max(500, Number(process.env.ONEBOT_ENRICH_CONTEXT_MAX_CHARS || 3500));
 const ENRICH_CONTEXT_PART_MAX_CHARS = Math.max(200, Number(process.env.ONEBOT_ENRICH_CONTEXT_PART_MAX_CHARS || 900));
+const RECENT_GROUP_FILE_CONTEXT_MINUTES = Math.max(1, Number(process.env.ONEBOT_RECENT_GROUP_FILE_CONTEXT_MINUTES || 10));
 const SILENCED_OUTGOING_PATTERNS = [
   "因空闲超过 30 分钟，已自动切换到新会话",
   "正在结束上一个会话",
@@ -166,6 +177,37 @@ const SILENCED_OUTGOING_PATTERNS = [
 const SILENT_REPLY_SENTINELS = [
   "不需要回复awa"
 ];
+const pluginManager = createPluginManager({
+  pluginDirs: [
+    path.join(path.dirname(WORKSPACE_ROOT), "plugins")
+  ],
+  configFiles: [
+    process.env.ONEBOT_PLUGIN_CONFIG,
+    path.join(path.dirname(WORKSPACE_ROOT), "configs", "plugins.json"),
+    process.env.ONEBOT_PLUGIN_LOCAL_CONFIG,
+    path.join(RUNTIME_DIR, "plugins.local.json")
+  ],
+  localConfigFile: process.env.ONEBOT_PLUGIN_LOCAL_CONFIG || path.join(RUNTIME_DIR, "plugins.local.json"),
+  plugins: [
+    {
+      id: "dream",
+      title: "dream",
+      enabled: DREAM_COMMAND_ENABLED,
+      settings: { triggers: DREAM_TRIGGERS }
+    },
+    {
+      id: "image",
+      title: "画图",
+      enabled: IMAGE_COMMAND_ENABLED,
+      settings: {
+        triggers: IMAGE_TRIGGERS,
+        max_concurrent_per_group: IMAGE_MAX_CONCURRENT_PER_GROUP,
+        queue_max_per_group: IMAGE_QUEUE_MAX_PER_GROUP
+      }
+    }
+  ],
+  log
+});
 let upstream = null;
 const clients = new Map();
 let upstreamReady = false;
@@ -275,6 +317,133 @@ function maskID(value) {
   return `${s.slice(0, 2)}***${s.slice(-2)}`;
 }
 
+function pluginContextForMessage(msg) {
+  if (!msg) {
+    return {};
+  }
+  if (msg.message_type === "group") {
+    return { groupID: Number(msg.group_id), userID: Number(msg.user_id || 0) };
+  }
+  if (msg.message_type === "private") {
+    return { userID: Number(msg.user_id || 0) };
+  }
+  return {};
+}
+
+function pluginTriggers(id, fallback) {
+  const value = pluginManager.settings(id).triggers;
+  const list = Array.isArray(value) ? value : String(value || "").split(",");
+  const normalized = list.map((item) => String(item).trim()).filter(Boolean);
+  return normalized.length ? normalized : fallback;
+}
+
+function pluginNumberSetting(id, name, fallback, min, max) {
+  const raw = pluginManager.settings(id)[name];
+  const parsed = Number(raw);
+  let value = Number.isFinite(parsed) ? parsed : fallback;
+  if (Number.isFinite(min)) {
+    value = Math.max(min, value);
+  }
+  if (Number.isFinite(max)) {
+    value = Math.min(max, value);
+  }
+  return value;
+}
+
+function pluginContextForRuntime(extra = {}) {
+  const msg = extra.msg || null;
+  const base = {
+    ...pluginContextForMessage(msg),
+    msg,
+    text: msg ? messageText(msg) : "",
+    now: extra.now || new Date(),
+    event: extra.event || "",
+    workspace: msg ? workspaceForPluginMessage(msg) : "",
+    projectRoot: path.dirname(WORKSPACE_ROOT),
+    api: pluginApi(),
+    log,
+    recordError,
+    maskSensitive,
+  };
+  return { ...base, ...extra };
+}
+
+function workspaceForPluginMessage(msg) {
+  if (!msg) {
+    return "";
+  }
+  if (msg.message_type === "group") {
+    return workspaceForGroup(msg.group_id);
+  }
+  if (msg.message_type === "private") {
+    return workspaceForPrivateUser(msg.user_id);
+  }
+  return "";
+}
+
+function pluginApi() {
+  return {
+    sendMessage: (msg, text) => {
+      if (!msg) {
+        return false;
+      }
+      if (msg.message_type === "group") {
+        sendGroupText(msg.group_id, msg.message_id || 0, text);
+        return true;
+      }
+      if (msg.message_type === "private") {
+        sendPrivateText(msg.user_id, msg.message_id || 0, text);
+        return true;
+      }
+      return false;
+    },
+    runCommand: (name, ...args) => {
+      log("plugin api runCommand", name);
+      if (name === "image.handle") {
+        return handleImageCommand(args[0], args[1]);
+      }
+      if (name === "dream.handle") {
+        return handleDreamCommand(args[0]);
+      }
+      throw new Error(`unknown plugin command: ${name}`);
+    },
+    schedule: (name, ...args) => {
+      if (name === "reminder.runDue") {
+        return runDueReminders(args[0]);
+      }
+      throw new Error(`unknown plugin schedule: ${name}`);
+    },
+    health: (name, ctx) => {
+      if (name === "image") {
+        return imagePluginHealth(ctx);
+      }
+      if (name === "dream") {
+        return dreamPluginHealth(ctx);
+      }
+      if (name === "reminder") {
+        return { ok: true, detail: "scheduled reminder hook registered" };
+      }
+      return { ok: false, detail: `unknown plugin health: ${name}` };
+    },
+  };
+}
+
+async function tryHandlePluginMessage(msg) {
+  const handled = await pluginManager.firstHandledAsync("onMessage", pluginContextForRuntime({ msg }));
+  if (!handled) {
+    return false;
+  }
+  if (handled.result && handled.result.error) {
+    recordError("plugin", handled.result.error, { scope: msg.message_type || "", target: String(msg.group_id || msg.user_id || ""), detail: handled.plugin });
+    return false;
+  }
+  return true;
+}
+
+async function runPluginSchedule(event, now = new Date()) {
+  return pluginManager.invokeAsync("onSchedule", pluginContextForRuntime({ event, now }));
+}
+
 function persistProxyState() {
   saveProxyState({
     file: PROXY_STATE_FILE,
@@ -327,9 +496,50 @@ function getProxyCommands() {
       feedbackStatus,
       proactiveStatus,
       setProactivityLevelForGroup,
+      resetConversation,
       maskSensitive,
       recentErrorFile: RECENT_ERROR_FILE,
       capabilitySnapshot: () => readCapabilitySnapshot(CAPABILITY_FILE),
+      pluginSnapshot: () => pluginManager.snapshot(),
+      checkPluginHealth: (id) => {
+        pluginManager.checkHealth(id || "", pluginContextForRuntime({ event: "admin_health" }));
+        refreshCapabilities();
+        return pluginManager.snapshot();
+      },
+      reloadPlugins: () => {
+        pluginManager.reload();
+        refreshCapabilities();
+        return pluginManager.snapshot();
+      },
+      enablePlugin: (id) => {
+        const item = pluginManager.setEnabled(id, true);
+        refreshCapabilities();
+        return item;
+      },
+      disablePlugin: (id) => {
+        const item = pluginManager.setEnabled(id, false);
+        refreshCapabilities();
+        return item;
+      },
+      setPluginScopedEnabled: (id, kind, scopeID, value) => {
+        const item = pluginManager.setScopedEnabled(id, kind, scopeID, value);
+        refreshCapabilities();
+        return item;
+      },
+      setPluginSetting: (id, key, value) => {
+        const item = pluginManager.setSetting(id, key, value);
+        refreshCapabilities();
+        return item;
+      },
+      testPlugin: (id) => {
+        const output = execFileSync(process.execPath, [path.join(__dirname, "test-plugins.js"), "--id", String(id || "")], {
+          cwd: path.dirname(WORKSPACE_ROOT),
+          encoding: "utf8",
+          timeout: 120000,
+          windowsHide: true,
+        });
+        return output.trim();
+      },
       groupRoutes: GROUP_ROUTES,
       privateRoutes: PRIVATE_ROUTES,
       adminLogFiles: {
@@ -351,6 +561,7 @@ function getProxyFiles() {
       pendingFileDownloads,
       sendUpstream,
       sendGroupText,
+      shouldSilenceGroupFileNotice,
       safeName,
       ensureDir,
       extractPdfText,
@@ -501,7 +712,7 @@ function connectUpstream() {
     flushPending();
   });
 
-  upstream.on("message", (data) => {
+  upstream.on("message", async (data) => {
     let msg;
     try {
       msg = JSON.parse(data.toString());
@@ -572,6 +783,10 @@ function connectUpstream() {
       }
       recordGroupMessage(msg);
       adminPokeAck(msg);
+      if (shouldSilenceAtOnlyGroupMessage(msg)) {
+        log("skip at-only group", msg.group_id, "msg", msg.message_id, "reason", "no-at");
+        return;
+      }
       if (tryHandleTaskContinueCommand(msg)) {
         return;
       }
@@ -579,7 +794,16 @@ function connectUpstream() {
         handleProxyCommand(msg);
         return;
       }
+      if (tryHandleAcademicSearch(msg)) {
+        return;
+      }
+      if (tryHandlePromptInjectionGuard(msg)) {
+        return;
+      }
       if (tryHandleRotaFollowup(msg)) {
+        return;
+      }
+      if (tryDispatchHeavyTask(msg)) {
         return;
       }
       if (tryHandleNaturalTask(msg)) {
@@ -589,12 +813,7 @@ function connectUpstream() {
         handleRotaIntent(msg);
         return;
       }
-      if (isDreamCommand(msg)) {
-        handleDreamCommand(msg);
-        return;
-      }
-      if (isImageCommand(msg)) {
-        handleImageCommand(msg);
+      if (await tryHandlePluginMessage(msg)) {
         return;
       }
     }
@@ -638,8 +857,17 @@ function connectUpstream() {
         handleProxyCommand(msg);
         return;
       }
-      if (isImageCommand(msg)) {
-        handleImageCommand(msg);
+      if (tryHandleAcademicSearch(msg)) {
+        ackMessage(msg);
+        return;
+      }
+      if (tryHandlePromptInjectionGuard(msg)) {
+        return;
+      }
+      if (await tryHandlePluginMessage(msg)) {
+        return;
+      }
+      if (tryDispatchHeavyTask(msg)) {
         return;
       }
       if (tryHandleNaturalTask(msg)) {
@@ -674,6 +902,18 @@ function routeForGroup(groupID) {
 
 function routeForPrivateUser(userID) {
   return PRIVATE_ROUTES.get(Number(userID));
+}
+
+function shouldSilenceGroupFileNotice(groupID) {
+  return SILENT_FILE_GROUPS.includes(Number(groupID));
+}
+
+function shouldSilenceAtOnlyGroupMessage(msg) {
+  return msg &&
+    msg.post_type === "message" &&
+    msg.message_type === "group" &&
+    AT_ONLY_GROUPS.includes(Number(msg.group_id)) &&
+    !isAtMessage(msg);
 }
 
 function maybeHandleProactiveGroupMessage(msg) {
@@ -856,6 +1096,29 @@ function dispatchToPort(port, msg) {
   return true;
 }
 
+function dispatchControlCommandToPort(port, msg, commandText) {
+  const target = clients.get(port);
+  if (!target || target.readyState !== WebSocket.OPEN) {
+    log("drop no client", port, "control", commandText || "", "msg", msg.message_id || "");
+    return false;
+  }
+  if (msg.post_type === "message" && msg.message_type === "group") {
+    activeTriggers.set(triggerKey(port, msg.group_id), Number(msg.message_id));
+  }
+  rememberActiveTriggerMessage(port, msg);
+  target.send(JSON.stringify(controlCommandPayload(msg, commandText)));
+  return true;
+}
+
+function controlCommandPayload(msg, commandText) {
+  const text = String(commandText || "").trim();
+  return {
+    ...msg,
+    raw_message: text,
+    message: [{ type: "text", data: { text } }]
+  };
+}
+
 function dispatchToPortWhenReady(port, msg, attempts = 6) {
   const target = clients.get(port);
   if (target && target.readyState === WebSocket.OPEN) {
@@ -921,6 +1184,14 @@ function enrichMessageForAgent(msg) {
   if (feedbackContext) {
     contextParts.push({ text: feedbackContext, priority: 70, kind: "feedback" });
   }
+  const personaContext = safeContext(() => botPersonaContextForMessage(msg), "persona");
+  if (personaContext) {
+    contextParts.push({ text: personaContext, priority: 95, kind: "persona" });
+  }
+  const recentFileContext = safeContext(() => recentGroupFilesContextForMessage(msg), "recent-group-files");
+  if (recentFileContext) {
+    contextParts.push({ text: recentFileContext, priority: 118, kind: "recent-group-files" });
+  }
   const taskContext = safeContext(() => taskAgentContextForMessage(msg), "task-agent");
   if (taskContext) {
     contextParts.push({ text: taskContext, priority: 120, kind: "task-agent" });
@@ -964,6 +1235,7 @@ function taskAgentContextForMessage(msg) {
   let parsed = parseTaskWithModel(text, route.task_type, {
     userID: msg.user_id,
     groupID: msg.group_id,
+    sourceImages: imageSourcesForMessage(msg),
     timezone: TASK_AGENT_TIMEZONE,
     today: todayLocal(),
   });
@@ -998,6 +1270,56 @@ function workspaceForMessage(msg) {
     return path.resolve(String(msg.__task_workspace));
   }
   return msg && msg.message_type === "private" ? workspaceForPrivateUser(msg.user_id) : workspaceForGroup(msg.group_id);
+}
+
+function recentGroupFilesContextForMessage(msg, options = {}) {
+  if (!msg || msg.post_type !== "message" || msg.message_type !== "group") {
+    return "";
+  }
+  if (!isAtMessage(msg) && !routedReplyPort(msg)) {
+    return "";
+  }
+  const minutes = Math.max(1, Number(options.minutes || RECENT_GROUP_FILE_CONTEXT_MINUTES));
+  const now = Number(options.now || Date.now());
+  const cutoff = now - minutes * 60 * 1000;
+  const workspace = workspaceForGroup(msg.group_id);
+  let files = [];
+  try {
+    files = recentFiles({ workspace, limit: Number(options.limit || 12) })
+      .filter((item) => {
+        const time = Date.parse(item.time || "");
+        return Number.isFinite(time) && time >= cutoff;
+      });
+  } catch {
+    return "";
+  }
+  if (files.length === 0) {
+    return "";
+  }
+  const lines = [
+    `【最近${minutes}分钟群文件】`,
+    "用户刚 @ 你时，如果问题可能和群里刚上传的文件有关，先主动查看这些 local_files 路径；不需要用户明确说“看文件”。",
+    "优先读取 summary_path/extracted_path；没有提取文本时直接读取原文件或用合适工具解析。"
+  ];
+  for (const item of files.slice(0, 6)) {
+    const bits = [
+      item.name || path.basename(item.relative_path || ""),
+      item.size ? formatBytesForContext(item.size) : "",
+      item.parser && item.parser !== "none" ? `parser=${item.parser}` : "",
+      item.relative_path || "",
+      item.summary_path ? `summary=${item.summary_path}` : "",
+      item.extracted_path ? `extracted=${item.extracted_path}` : ""
+    ].filter(Boolean);
+    lines.push(`- ${bits.join(" | ")}`);
+  }
+  return lines.join("\n");
+}
+
+function formatBytesForContext(value) {
+  const n = Number(value) || 0;
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)}MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)}KB`;
+  return `${n}B`;
 }
 
 function composeEnrichedContext(parts, options = {}) {
@@ -1078,11 +1400,13 @@ function contextKindOrder(kind) {
     proactive: 0,
     "reply-chain": 1,
     mood: 2,
-    feedback: 3,
-    "【当前成员画像】": 4,
-    "【个人画像】": 4,
-    "【群资料】": 5,
-    continuity: 6
+    persona: 3,
+    "recent-group-files": 4,
+    feedback: 5,
+    "【当前成员画像】": 6,
+    "【个人画像】": 6,
+    "【群资料】": 7,
+    continuity: 8
   };
   return order[String(kind || "")] ?? 50;
 }
@@ -1112,6 +1436,44 @@ function profileContextsForMessage(msg) {
     ].filter(Boolean);
   }
   return [];
+}
+
+function botPersonaContextForMessage(msg) {
+  if (!msg || !["group", "private"].includes(msg.message_type)) {
+    return "";
+  }
+  const workspace = msg.message_type === "private" ? workspaceForPrivateUser(msg.user_id) : workspaceForGroup(msg.group_id);
+  const lines = [
+    "【长期相处风格】",
+    "- 允许根据本群/私聊画像、聊天语境、反馈和近期气氛形成自己的稳定说话风格；可以自然变化，不必每次像客服或说明书。",
+    "- 先读话中话：识别调侃、反话、暗示、熟人语境和未说出口的需求；不确定时用短句确认，不要长篇解释自己不确定。",
+    "- 默认像正常聊天对象：短、顺口、有上下文承接；少用“作为AI/我无法体会/需要注意的是/以下是”等 AI 腔。",
+    "- 不要把每次回复都写成服务台收尾；少说“要不要我帮你…/如果你需要我可以…/我可以继续…”。下一步明确就直接做，不能做就说明阻塞，确实需要选择时只问一个具体问题。",
+    "- 群聊里尤其低打扰：回答完就停，不主动追问、不硬续话、不为了显得热情而补一句任务邀约。",
+    "- 可以接梗、轻微吐槽、顺着用户语气说话；但不要冒充某个真人、不要声称线下经历、不要替用户本人说话。",
+    "- 技术或复杂任务仍要靠谱：该跑命令就跑命令，该给路径就给路径，该说明失败就说明失败。"
+  ];
+  const localStyle = compactStyleFile(path.join(workspace, "memory", "bot-style.md"));
+  if (localStyle) {
+    lines.push("本聊天已沉淀风格：");
+    lines.push(localStyle);
+  }
+  return lines.join("\n");
+}
+
+function compactStyleFile(file) {
+  try {
+    if (!fs.existsSync(file)) return "";
+    return fs.readFileSync(file, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !/^#/.test(line))
+      .slice(-8)
+      .join("\n")
+      .slice(0, 600);
+  } catch {
+    return "";
+  }
 }
 
 function buildContinuityContextForMessage(msg, options = {}) {
@@ -1550,6 +1912,18 @@ function messageTextFromSegments(segments) {
   }).join("").trim();
 }
 
+function imageSourcesForMessage(msg) {
+  return messageSegments(msg)
+    .filter((seg) => seg && seg.type === "image")
+    .map((seg) => {
+      const data = seg.data || {};
+      return data.url || data.file || data.path || data.image || data.image_url || "";
+    })
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
 function ackMessage(msg) {
   const echo = `__ack_${msg.message_id}_${Date.now()}`;
   sendUpstream({
@@ -1595,6 +1969,28 @@ function adminPokeAck(msg) {
   sendUpstream(payload);
 }
 
+function promptInjectionGuardForMessage(msg) {
+  if (!msg || msg.post_type !== "message" || !["group", "private"].includes(msg.message_type)) {
+    return { action: "allow", reason: "" };
+  }
+  return evaluatePromptInjectionRisk(messageText(msg), {
+    messageType: msg.message_type,
+    groupID: msg.group_id,
+    userID: msg.user_id,
+    isAdmin: ADMIN_USERS.includes(Number(msg.user_id)) || ADMIN_ROOT_USERS.includes(Number(msg.user_id)),
+  });
+}
+
+function tryHandlePromptInjectionGuard(msg) {
+  const decision = promptInjectionGuardForMessage(msg);
+  if (!decision || decision.action !== "block") {
+    return false;
+  }
+  log("prompt guard blocked", "reason", decision.reason, "type", msg.message_type, "group", msg.group_id || "", "user", msg.user_id || "", "msg", msg.message_id || "");
+  sendTaskReply(msg, decision.reply || "这个请求存在提示词注入或高风险操作迹象，我不会执行。");
+  return true;
+}
+
 function commandBody(msg, names) {
   const text = messageText(msg).trim();
   for (const name of names) {
@@ -1617,6 +2013,50 @@ function isProxyCommand(msg) {
 
 function handleProxyCommand(msg) {
   return getProxyCommands().handleProxyCommand(msg);
+}
+
+function tryHandleAcademicSearch(msg) {
+  const text = messageText(msg).trim();
+  if (!looksLikeAcademicSearch(text)) {
+    return false;
+  }
+  const workspace = msg.message_type === "group"
+    ? workspaceForGroup(msg.group_id)
+    : workspaceForPrivateUser(msg.user_id);
+  const matches = searchAcademicArchive({ workspace, query: text, limit: 5 });
+  if (matches.length === 0) {
+    return false;
+  }
+  const replyText = formatAcademicArchiveMatches(matches, text);
+  if (msg.message_type === "private") {
+    sendPrivateText(msg.user_id, msg.message_id, replyText);
+  } else {
+    sendGroupText(msg.group_id, msg.message_id, replyText);
+  }
+  return true;
+}
+
+function resetConversation(msg) {
+  const port = resetConversationPort(msg);
+  if (!port) {
+    return "无法新建对话：当前聊天没有可用的 cc-connect 路由。";
+  }
+  if (!dispatchControlCommandToPort(port, msg, "/new")) {
+    return `无法新建对话：cc-connect 端口 ${port} 未连接。`;
+  }
+  return "";
+}
+
+function resetConversationPort(msg) {
+  if (msg.message_type === "private") {
+    const route = routeForPrivateUser(Number(msg.user_id));
+    return route && route.port;
+  }
+  if (msg.message_type === "group") {
+    const route = routeForGroup(msg.group_id);
+    return routedReplyPort(msg) || (isAtMessage(msg) ? route.atPort : route.listenPort) || route.atPort;
+  }
+  return null;
 }
 
 function isRotaIntent(msg) {
@@ -1704,6 +2144,7 @@ function tryHandleNaturalTask(msg) {
       scopeID: isPrivate ? msg.user_id : msg.group_id,
       groupID: msg.group_id,
       userID: msg.user_id,
+      sourceImages: imageSourcesForMessage(msg),
     },
     options: taskAgentOptions(),
   });
@@ -1742,6 +2183,7 @@ function tryHandleTaskContinueCommand(msg) {
       scopeID: request.task.scope_id || (isPrivate ? msg.user_id : msg.group_id),
       groupID: request.task.scope === "group" ? request.task.scope_id : msg.group_id,
       userID: request.task.user_id || msg.user_id,
+      sourceImages: imageSourcesForMessage(msg),
     },
     options: taskAgentOptions(),
   });
@@ -1837,6 +2279,32 @@ function naturalTaskRouteForMessage(msg) {
   }
   const min = msg.message_type === "group" && !isAtMessage(msg) ? 0.68 : 0.6;
   return route.confidence >= min ? route : { ...route, kind: "chat" };
+}
+
+function heavyTaskPortForMessage(msg, options = {}) {
+  const port = Number(Object.prototype.hasOwnProperty.call(options, "vivadoTaskPort") ? options.vivadoTaskPort : VIVADO_TASK_PORT);
+  if (!port) {
+    return null;
+  }
+  const route = naturalTaskRouteForMessage(msg);
+  if (route.kind === "task" && route.task_type === "vivado_simulation") {
+    return port;
+  }
+  return null;
+}
+
+function tryDispatchHeavyTask(msg) {
+  const port = heavyTaskPortForMessage(msg);
+  if (!port) {
+    return false;
+  }
+  ackMessage(msg);
+  if (!dispatchToPort(port, msg)) {
+    sendTaskReply(msg, `仿真任务需要重任务 agent，但端口 ${port} 当前未连接。`);
+  } else {
+    log("route heavy task", "type", naturalTaskRouteForMessage(msg).task_type, "port", port, "msg", msg.message_id || "");
+  }
+  return true;
 }
 
 function sendTaskReply(msg, text) {
@@ -2253,11 +2721,11 @@ function topKeywords(text) {
 }
 
 function isDreamCommand(msg) {
-  if (!DREAM_COMMAND_ENABLED || msg.post_type !== "message" || msg.message_type !== "group") {
+  if (msg.post_type !== "message" || msg.message_type !== "group" || !pluginManager.enabled("dream", pluginContextForMessage(msg))) {
     return false;
   }
   const text = messageText(msg).trim();
-  return DREAM_TRIGGERS.some((trigger) => text === trigger);
+  return pluginTriggers("dream", DREAM_TRIGGERS).some((trigger) => text === trigger);
 }
 
 function handleDreamCommand(msg) {
@@ -2323,6 +2791,16 @@ function dreamScriptForWorkspace(workspace) {
   return { command: sh, args: [] };
 }
 
+function dreamPluginHealth(ctx = {}) {
+  const groupID = ctx.groupID || (ALLOWED_GROUPS[0] || 0);
+  if (!groupID) {
+    return { ok: false, detail: "no group configured" };
+  }
+  const script = dreamScriptForWorkspace(workspaceForGroup(groupID));
+  const scriptPath = script.command === "powershell.exe" ? script.args[script.args.length - 1] : script.command;
+  return { ok: fs.existsSync(scriptPath), detail: scriptPath };
+}
+
 function sendGroupText(groupID, replyToMessageID, text) {
   sendGroupMessage(groupID, replyToMessageID, [{ type: "text", data: { text: String(text || "") } }]);
 }
@@ -2348,11 +2826,11 @@ function sendGroupMessage(groupID, replyToMessageID, segments) {
 }
 
 function imagePromptFromMessage(msg) {
-  if (!IMAGE_COMMAND_ENABLED || msg.post_type !== "message" || !["group", "private"].includes(msg.message_type)) {
+  if (msg.post_type !== "message" || !["group", "private"].includes(msg.message_type) || !pluginManager.enabled("image", pluginContextForMessage(msg))) {
     return null;
   }
   const text = messageText(msg).trim();
-  for (const trigger of IMAGE_TRIGGERS) {
+  for (const trigger of pluginTriggers("image", IMAGE_TRIGGERS)) {
     if (text === trigger) {
       return "";
     }
@@ -2370,10 +2848,10 @@ function isImageCommand(msg) {
   return imagePromptFromMessage(msg) !== null;
 }
 
-function handleImageCommand(msg) {
+function handleImageCommand(msg, promptOverride = undefined) {
   const isPrivate = msg.message_type === "private";
   const targetID = Number(isPrivate ? msg.user_id : msg.group_id);
-  const prompt = imagePromptFromMessage(msg);
+  const prompt = promptOverride === undefined ? imagePromptFromMessage(msg) : String(promptOverride || "");
   ackMessage(msg);
 
   if (!prompt) {
@@ -2382,14 +2860,16 @@ function handleImageCommand(msg) {
   }
   const key = imageStateKey(msg);
   const state = getImageState(key);
-  if (state.queue.length >= IMAGE_QUEUE_MAX_PER_GROUP) {
+  const queueMax = pluginNumberSetting("image", "queue_max_per_group", IMAGE_QUEUE_MAX_PER_GROUP, 0, 1000);
+  const maxConcurrent = pluginNumberSetting("image", "max_concurrent_per_group", IMAGE_MAX_CONCURRENT_PER_GROUP, 1, 100);
+  if (state.queue.length >= queueMax) {
     sendImageText(msg, "画图队列已满，稍后再试。");
     return;
   }
 
   state.queue.push({ msg, prompt });
   log("image queued", isPrivate ? "private" : "group", targetID, "msg", msg.message_id, "active", state.active, "depth", state.queue.length);
-  if (state.active >= IMAGE_MAX_CONCURRENT_PER_GROUP) {
+  if (state.active >= maxConcurrent) {
     sendImageText(msg, `已加入画图队列，前面还有 ${state.queue.length - 1} 张。`);
   }
   pumpImageQueue(key);
@@ -2408,9 +2888,22 @@ function getImageState(key) {
   return state;
 }
 
+function imagePluginHealth() {
+  return {
+    ok: fs.existsSync(IMAGE_SCRIPT),
+    detail: IMAGE_SCRIPT,
+    queues: [...imageStates.entries()].map(([key, state]) => ({
+      key,
+      active: state.active,
+      queued: state.queue.length,
+    })),
+  };
+}
+
 function pumpImageQueue(key) {
   const state = getImageState(key);
-  while (state.active < IMAGE_MAX_CONCURRENT_PER_GROUP && state.queue.length > 0) {
+  const maxConcurrent = pluginNumberSetting("image", "max_concurrent_per_group", IMAGE_MAX_CONCURRENT_PER_GROUP, 1, 100);
+  while (state.active < maxConcurrent && state.queue.length > 0) {
     const credential = acquireImageCredential();
     if (!credential) {
       return;
@@ -2726,6 +3219,10 @@ function collectOutgoingFileUploadCandidates(text, workspace, projectRoot = path
     if (!candidate || seen.has(candidate.path)) {
       continue;
     }
+    if (isVivadoNonImageUploadCandidate(candidate.path, workspace)) {
+      log("skip outgoing file upload", "vivado-non-image", candidate.path);
+      continue;
+    }
     seen.add(candidate.path);
     candidates.push(candidate);
     if (candidates.length >= OUTGOING_FILE_UPLOAD_MAX_FILES) {
@@ -2733,6 +3230,14 @@ function collectOutgoingFileUploadCandidates(text, workspace, projectRoot = path
     }
   }
   return candidates;
+}
+
+function isVivadoNonImageUploadCandidate(filePath, workspace) {
+  const relative = path.relative(path.resolve(workspace), path.resolve(filePath)).replace(/\\/g, "/");
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    return false;
+  }
+  return /^local_files\/vivado\//i.test(relative) && !isChatImageFile(relative);
 }
 
 function shouldUploadMentionedFiles(text) {
@@ -2968,6 +3473,25 @@ function uploadChatFile(target, filePath, fileName, meta = {}) {
   recentOutgoingFileUploads.set(key, Date.now());
   const name = safeName(fileName || path.basename(resolved));
   const echo = `__upload_file_${target.type}_${target.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const workspace = target.type === "private" ? workspaceForPrivateUser(target.id) : workspaceForGroup(target.id);
+  const relativePath = meta.relativePath || path.relative(workspace, resolved).replace(/\\/g, "/");
+  if (isChatImageFile(resolved)) {
+    pendingFileUploads.set(echo, {
+      target,
+      file: resolved,
+      name,
+      source: meta.source || "",
+      outboxPath: meta.outboxPath || "",
+      taskID: meta.taskID || "",
+      taskType: meta.taskType || "",
+      relativePath,
+      ts: Date.now()
+    });
+    sendChatImageFile(target, resolved, echo);
+    log("send outgoing image", target.type, target.id, name, meta.source || "");
+    appendLine(path.join(workspace, "local_files", "INDEX.md"), `- ${new Date().toISOString()} 已回传图片: ${relativePath}`);
+    return true;
+  }
   const action = target.type === "private" ? "upload_private_file" : "upload_group_file";
   const params = target.type === "private"
     ? { user_id: Number(target.id), file: resolved, name }
@@ -2980,15 +3504,28 @@ function uploadChatFile(target, filePath, fileName, meta = {}) {
     outboxPath: meta.outboxPath || "",
     taskID: meta.taskID || "",
     taskType: meta.taskType || "",
-    relativePath: meta.relativePath || path.relative(target.type === "private" ? workspaceForPrivateUser(target.id) : workspaceForGroup(target.id), resolved).replace(/\\/g, "/"),
+    relativePath,
     ts: Date.now()
   });
   sendUpstream({ action, params, echo });
   log("upload outgoing file", target.type, target.id, name, meta.source || "");
 
-  const workspace = target.type === "private" ? workspaceForPrivateUser(target.id) : workspaceForGroup(target.id);
-  appendLine(path.join(workspace, "local_files", "INDEX.md"), `- ${new Date().toISOString()} 已回传: ${path.relative(workspace, resolved).replace(/\\/g, "/")}`);
+  appendLine(path.join(workspace, "local_files", "INDEX.md"), `- ${new Date().toISOString()} 已回传: ${relativePath}`);
   return true;
+}
+
+function isChatImageFile(filePath) {
+  return /\.(?:png|jpe?g|gif|webp|bmp)$/i.test(String(filePath || ""));
+}
+
+function sendChatImageFile(target, filePath, echo) {
+  const imageData = fs.readFileSync(path.resolve(filePath)).toString("base64");
+  const message = [{ type: "image", data: { file: `base64://${imageData}` } }];
+  const action = target.type === "private" ? "send_private_msg" : "send_group_msg";
+  const params = target.type === "private"
+    ? { user_id: Number(target.id), message }
+    : { group_id: Number(target.id), message };
+  sendUpstream({ action, params, echo });
 }
 
 function pruneRecentOutgoingFileUploads() {
@@ -3626,6 +4163,15 @@ function updateTaskRequestFromBotReply({ workspace, triggerMsg, text, runtimeDir
       ],
     },
   });
+  if (finalStatus === "done") {
+    archiveAcademicTaskResult({
+      workspace,
+      task,
+      text,
+      artifacts: artifactCheck.artifacts,
+      status: finalStatus,
+    });
+  }
   updateTaskRequest({
     workspace,
     id: task.id,
@@ -3637,7 +4183,7 @@ function updateTaskRequestFromBotReply({ workspace, triggerMsg, text, runtimeDir
 }
 
 function enqueueTaskArtifactUploads({ workspace, task, artifacts = [], runtimeDir = RUNTIME_DIR }) {
-  if (!task || !["file_modify_and_return", "script_create_and_run"].includes(String(task.task_type || ""))) {
+  if (!task || !["file_modify_and_return", "script_create_and_run", "vivado_simulation"].includes(String(task.task_type || ""))) {
     return null;
   }
   const rows = taskArtifactOutboxRows({ workspace, task, artifacts });
@@ -3679,6 +4225,9 @@ function taskArtifactOutboxRows({ workspace, task, artifacts = [] }) {
       requireGenerated: task.task_type === "script_create_and_run",
     });
     if (!checked.ok) {
+      continue;
+    }
+    if (task.task_type === "vivado_simulation" && !isChatImageFile(checked.relative_path)) {
       continue;
     }
     const row = {
@@ -4586,6 +5135,33 @@ function runDueReminders(now = new Date()) {
   }
 }
 
+function runDueCourses(now = new Date()) {
+  for (const groupID of ALLOWED_GROUPS) {
+    try {
+      const workspace = workspaceForGroup(groupID);
+      for (const item of dueCourseNotifications(workspace, now)) {
+        sendGroupMessage(groupID, 0, item.message || item.text);
+        log("course reminder sent", "group", groupID, "id", item.schedule.id, "kind", item.event.kind);
+      }
+    } catch (err) {
+      log("course reminder check failed", "group", groupID, err.message);
+      recordError("course-reminder", err.message, { scope: "group", target: String(groupID) });
+    }
+  }
+  for (const userID of ALLOWED_PRIVATE_USERS) {
+    try {
+      const workspace = workspaceForPrivateUser(userID);
+      for (const item of dueCourseNotifications(workspace, now)) {
+        sendPrivateText(userID, 0, item.text);
+        log("course reminder sent", "private", userID, "id", item.schedule.id, "kind", item.event.kind);
+      }
+    } catch (err) {
+      log("course reminder check failed", "private", userID, err.message);
+      recordError("course-reminder", err.message, { scope: "private", target: String(userID) });
+    }
+  }
+}
+
 function handleFileDownloadResponse(resp) {
   const pendingInfo = pendingFileDownloads.get(resp.echo);
   pendingFileDownloads.delete(resp.echo);
@@ -4677,6 +5253,7 @@ function healthSnapshot() {
     pendingOutbound,
     pendingFileDownloads,
     botReplyRoutes,
+    extraRequiredPorts: [VIVADO_TASK_PORT].filter(Boolean),
     fileStats: getProxyFiles().stats,
     capabilities: readCapabilitySnapshot(CAPABILITY_FILE),
     recentErrors: readRecentErrors({ file: RECENT_ERROR_FILE, limit: 5, maskSensitive }),
@@ -4707,7 +5284,8 @@ function refreshCapabilities() {
       imageScript: IMAGE_SCRIPT,
       renderScript: RENDER_SCRIPT,
       renderImageMagickScript: RENDER_IMAGEMAGICK_SCRIPT,
-      taskTimezone: TASK_AGENT_TIMEZONE
+      taskTimezone: TASK_AGENT_TIMEZONE,
+      plugins: pluginManager.snapshot()
     }),
     log
   });
@@ -4725,6 +5303,7 @@ function reloadRuntime() {
     atOnlyGroups: AT_ONLY_GROUPS,
     log
   });
+  pluginManager.reload();
   refreshCapabilities();
   return "已重载 proxy state 和能力快照。";
 }
@@ -4785,7 +5364,10 @@ if (require.main === module) {
   setInterval(drainFileOutboxes, OUTGOING_FILE_OUTBOX_SCAN_INTERVAL_MS).unref();
   setInterval(runPrivateCheckins, PROACTIVE_CHECKIN_INTERVAL_MS).unref();
   setInterval(runDueRotas, ROTA_CHECK_INTERVAL_MS).unref();
-  setInterval(runDueReminders, REMINDER_CHECK_INTERVAL_MS).unref();
+  setInterval(() => {
+    runPluginSchedule("reminder_due", new Date()).catch((err) => recordError("plugin", err.message, { scope: "system", target: "schedule", detail: "reminder_due" }));
+  }, REMINDER_CHECK_INTERVAL_MS).unref();
+  setInterval(runDueCourses, COURSE_CHECK_INTERVAL_MS).unref();
 }
 
 module.exports = {
@@ -4794,6 +5376,7 @@ module.exports = {
   outgoingRenderTarget,
   renderForQQ,
   enrichMessageForAgent,
+  promptInjectionGuardForMessage,
   composeEnrichedContext,
   taskAgentContextForMessage,
   feedbackContextSignalsForMessage,
@@ -4803,18 +5386,24 @@ module.exports = {
   isExplicitQaRequest,
   isReplyToKnownBotMessage,
   messageText,
+  imageSourcesForMessage,
   normalizeVisualMessage,
   normalizeVisualSegments,
   shouldDispatchListenMessage,
+  shouldSilenceAtOnlyGroupMessage,
+  recentGroupFilesContextForMessage,
   naturalTaskRouteForMessage,
+  heavyTaskPortForMessage,
   workspaceForGroup,
   workspaceForPrivateUser,
   executionWorkspaceForPrivateUser,
   explainRouteScope,
   parseImageCredentials,
+  controlCommandPayload,
   shouldAdminPokeAck,
   adminPokePayload,
   shouldSilenceOutgoing,
+  isChatImageFile,
   shouldUploadMentionedFiles,
   collectOutgoingFileUploadCandidates,
   fileOutboxCandidates,
@@ -4834,6 +5423,7 @@ module.exports = {
   recordGroupMessage,
   isRotaIntent,
   tryHandleRotaFollowup,
+  tryHandleAcademicSearch,
   tryHandleNaturalTask,
   tryHandleTaskContinueCommand,
   taskContinueRequestForMessage,
@@ -4841,6 +5431,11 @@ module.exports = {
   awaitingNaturalTaskContinuation,
   runDueRotas,
   runDueReminders,
+  runDueCourses,
+  isDreamCommand,
+  isImageCommand,
+  imagePromptFromMessage,
+  pluginManager,
   isPdfFileData,
   retryPendingPrivatePdfDownloads,
   recentBotReplies,

@@ -10,9 +10,9 @@ const { addProposal, updateProposalStatus } = require("./lib/proposal-store");
 const { addTodo } = require("./lib/todo-store");
 const { maskSensitive } = require("./lib/sensitive-redaction");
 
-const GROUP_ID = 9876500001;
-const ADMIN_USER = 1234500001;
-const NORMAL_USER = 1234500002;
+const GROUP_ID = 123456789;
+const ADMIN_USER = 100000001;
+const NORMAL_USER = 100000002;
 const RAW_SECRET = "focus-secret-value";
 
 function main() {
@@ -72,7 +72,7 @@ function runCanaries(root) {
     name: "todo-fallback-focus",
     msg: privateMsg(ADMIN_USER, "/审查包"),
     mustMatch: [
-      /范围：private:1234500001/,
+      /范围：private:100000001/,
       /本轮焦点：待办 .* FOCUS_TODO_FALLBACK/,
       /候选：\[project\].*FOCUS_CANDIDATE_FALLBACK/,
       /待办：FOCUS_TODO_FALLBACK/,

@@ -48,7 +48,9 @@ function createProxyFiles(deps) {
       params: { file_id: String(fileID) },
       echo
     });
-    deps.sendGroupText(Number(msg.group_id), msg.message_id || 0, `收到文件：${fileInfo.name || fileID}。正在自动下载归档；需要总结、提取重点或出题复习时直接 @ 我说需求。`);
+    if (!shouldSilenceGroupFileNotice(msg.group_id)) {
+      deps.sendGroupText(Number(msg.group_id), msg.message_id || 0, `收到文件：${fileInfo.name || fileID}。正在自动下载归档；需要总结、提取重点或出题复习时直接 @ 我说需求。`);
+    }
   }
 
   function handleGroupFileDownloadResponse(pendingInfo, resp) {
@@ -61,7 +63,7 @@ function createProxyFiles(deps) {
       inc("archived");
       deps.log("file archived", pendingInfo.groupID, saved.relativePath);
       archiveSavedFile(workspace, saved, pendingInfo).then((result) => {
-        if (result && result.notice) {
+        if (result && result.notice && !shouldSilenceGroupFileNotice(pendingInfo.groupID)) {
           deps.sendGroupText(pendingInfo.groupID, pendingInfo.messageID || 0, fileArchiveNotice(saved, result));
         }
       }).catch((err) => {
@@ -70,7 +72,9 @@ function createProxyFiles(deps) {
         if (deps.recordError) {
           deps.recordError("file-parse", err.message, { scope: "group", target: String(pendingInfo.groupID), detail: saved.relativePath });
         }
-        deps.sendGroupText(pendingInfo.groupID, pendingInfo.messageID || 0, `文件已归档，但解析失败：${saved.relativePath}\n${err.message}`);
+        if (!shouldSilenceGroupFileNotice(pendingInfo.groupID)) {
+          deps.sendGroupText(pendingInfo.groupID, pendingInfo.messageID || 0, `文件已归档，但解析失败：${saved.relativePath}\n${err.message}`);
+        }
       });
       return true;
     }
@@ -196,6 +200,10 @@ function createProxyFiles(deps) {
     }
     lines.push("需要总结、提取重点、讲某一页或出题复习时，直接 @ 我说需求。");
     return lines.join("\n");
+  }
+
+  function shouldSilenceGroupFileNotice(groupID) {
+    return typeof deps.shouldSilenceGroupFileNotice === "function" && deps.shouldSilenceGroupFileNotice(groupID);
   }
 
   function uniquePath(target) {

@@ -15,14 +15,17 @@ Task:
 2. Read existing profile files:
    - group workspace: `GROUP_PROFILE.md` and `members/*.md`
    - private workspace: `PROFILE.md`
+   - optional style memory: `memory/bot-style.md`
 3. Update durable user profiles from actual chat evidence.
-4. Write a short run note to `memory/profile-updates/<timestamp>.md`.
+4. Update `memory/bot-style.md` when there is evidence that the bot should adapt its tone, inside jokes, reply length, or social posture in this chat.
+5. Write a short run note to `memory/profile-updates/<timestamp>.md`.
 
 Allowed edits:
 
 - `GROUP_PROFILE.md`
 - `members/*.md`
 - `PROFILE.md`
+- `memory/bot-style.md`
 - `memory/profile-updates/*.md`
 
 Do not edit source code, configs, docs, scripts, AGENTS.md, KNOWLEDGE.md, chat logs, files, or unrelated memory files.
@@ -31,6 +34,8 @@ Profile rules:
 
 - Keep facts concise and evidence-grounded.
 - Prefer stable preferences, boundaries, common topics, reply style, ongoing tasks, file habits, and useful context.
+- The bot may develop a local chat style like a long-term participant: record short, evidence-backed style notes such as preferred bluntness, humor, callback phrases, tolerated teasing, or when to stay quiet.
+- Do not make the bot claim to be a human, a specific real person, or to have offline experiences. The style file is about voice and social fit, not fake identity.
 - Do not invent identity, relationship, intent, emotion, or private details.
 - Do not store secrets, tokens, cookies, provider keys, passwords, auth headers, private URLs, or raw sensitive strings.
 - Treat QQ numbers and group IDs as routing metadata, not secrets, but avoid copying raw chat content unless it is short and genuinely useful.

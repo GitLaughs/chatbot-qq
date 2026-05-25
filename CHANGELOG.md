@@ -7,30 +7,32 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+## [0.2.20] - 2026-05-25
+
+### Added
+
+- Added plugin-platform release content, plugin manager tests, and plugin-scoped configuration examples for new QQ bot features.
+- Added publish-ready privacy review coverage for local paths, runtime workspace files, and private routing examples.
+
 ### Changed
 
-- Expanded beginner Linux install docs with copy-paste terminal commands for dependencies, Node.js, cc-connect, service install, and timer startup.
-- Tightened deploy-readiness checks so the beginner installer must include natural-language task, artifact executor, deploy confirmation, evidence packet, and JSONL shard defaults.
-- Documented the current public feature surface in the README without copying local QQ IDs, secrets, NapCat config, private logs, chat exports, or private memory.
+- Redacted real QQ user IDs, group IDs, and local Windows paths from public examples, docs, tests, and default route settings.
+- Refreshed README, install notes, release notes, and package metadata for the public `GitLaughs/chatbot-qq` release.
+
+### Security
+
+- Hardened public release examples so committed configs use placeholder IDs and generated local config remains ignored.
 
 ## [0.2.19] - 2026-05-25
 
 ### Added
 
-- Added the natural-language task agent surface for reminders, weekly rota tasks, file modification, script generation, deploy/restart confirmation, task receipts, and file upload outbox tracking.
-- Added compact evidence packet generation and JSONL sharding helpers so profile updates and dream reviews avoid scanning large raw chat logs directly.
-- Added OpenToken subscription monitoring, task parser/artifact bridge canaries, deployment readiness checks, and profile update service/timer packaging.
-- Added grouped `/help` output with keyword search, cleaner no-match output, and current task/file/memory/admin command coverage.
+- Added `docs/daily-group-product-plan.md` as a private friend-group personalization plan rather than a public product plan.
+- Added `docs/optimization-report-2026-05-23.md` with current QQ bridge status and next self-use hardening steps.
 
 ### Changed
 
-- Updated the beginner Linux installer and example env to include task-agent, artifact executor, deploy confirmation, compact evidence, profile update, and JSONL shard settings.
-- Refreshed install/deploy docs for the current NapCat / OneBot + onebot-group-proxy + cc-connect route.
-- Sanitized public examples so local paths and real QQ routing IDs are represented by placeholders.
-
-### Fixed
-
-- Improved QQ message rendering, file indexing, pending memory handling, proposal/todo formatting, provider failover checks, and release validation coverage.
+- Clarified the default group workspace instructions for warm, natural, profile-aware replies.
 
 ## [0.2.18] - 2026-05-24
 

@@ -11,10 +11,10 @@ const { appendRecentError } = require("./lib/recent-errors");
 const { addTodo } = require("./lib/todo-store");
 const { maskSensitive } = require("./lib/sensitive-redaction");
 
-const GROUP_A = 9876500001;
-const GROUP_B = 987650002;
-const ADMIN_USER = 1234500001;
-const NORMAL_USER = 1234500002;
+const GROUP_A = 123456789;
+const GROUP_B = 234567890;
+const ADMIN_USER = 100000001;
+const NORMAL_USER = 100000002;
 const RAW_SECRET = "source-isolation-secret-value";
 
 function main() {

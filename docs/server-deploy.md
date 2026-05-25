@@ -308,6 +308,30 @@ Dry-run restore test, without touching live `/opt/chatbot-qq`:
 .\scripts\test-restore-chatbot-qq-backup.ps1 -Archive C:\chatbot-qq\backup\server-daily\chatbot-qq-server-YYYYMMDD-HHMMSS.tar.gz
 ```
 
+Full server migration backup, including QQ, Feishu/OpenClaw, data, systemd units,
+dependency inventory, local auth state, and secrets:
+
+```powershell
+cd C:\chatbot-qq
+.\scripts\backup-server-migration.ps1
+```
+
+The migration archive is written under `backup\server-migration\` and is ignored
+by git. It may contain API keys, cookies, QQ/NapCat login state, Feishu config,
+chat workspaces, and Codex auth. Keep it offline or encrypted and never commit it.
+
+Before deleting anything from the old server, run cleanup dry-run against the
+verified archive and SHA256:
+
+```powershell
+.\scripts\cleanup-old-server-after-migration.ps1 `
+  -BackupArchive C:\chatbot-qq\backup\server-migration\chatbot-qq-full-migration-YYYYMMDD-HHMMSS.tar.gz `
+  -ExpectedSha256 SHA256_FROM_MANIFEST
+```
+
+Only after the new server is restored and verified, add `-ConfirmCleanup`.
+Use `-KeepFeishu` or `-KeepRootCodex` if the old server should keep those parts.
+
 Check that Feishu stayed active and QQ ports are isolated:
 
 ```powershell

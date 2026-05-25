@@ -26,7 +26,7 @@ max_messages = 20
 window_secs = 60
 
 [[projects]]
-name = "qq-admin-root-1234500001"
+name = "qq-admin-root-100000001"
 reset_on_idle_mins = 30
 
 [projects.agent]
@@ -44,18 +44,18 @@ type = "qq"
 [projects.platforms.options]
 ws_url = "ws://127.0.0.1:3011"
 token = ""
-allow_from = "1234500001"
+allow_from = "100000001"
 share_session_in_channel = false
 
 [[projects]]
-name = "qq-sandbox-9876500001-listen"
+name = "qq-sandbox-123456789-listen"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "C:\\chatbot-qq\\groups\\sandbox-9876500001"
+work_dir = "C:\\chatbot-qq\\groups\\sandbox-123456789"
 mode = "full-auto"
 model = "gpt-5.4-mini"
 reasoning_effort = "medium"
@@ -70,17 +70,17 @@ allow_from = "*"
 share_session_in_channel = true
 
 [[projects]]
-name = "qq-sandbox-9876500001-at"
+name = "qq-sandbox-123456789-at"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "C:\\chatbot-qq\\groups\\sandbox-9876500001"
+work_dir = "C:\\chatbot-qq\\groups\\sandbox-123456789"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"
@@ -92,14 +92,14 @@ allow_from = "*"
 share_session_in_channel = false
 
 [[projects]]
-name = "qq-sandbox-987650003-listen"
+name = "qq-sandbox-345678901-listen"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "C:\\chatbot-qq\\groups\\sandbox-987650003"
+work_dir = "C:\\chatbot-qq\\groups\\sandbox-345678901"
 mode = "full-auto"
 model = "gpt-5.4-mini"
 reasoning_effort = "medium"
@@ -114,17 +114,17 @@ allow_from = "*"
 share_session_in_channel = true
 
 [[projects]]
-name = "qq-sandbox-987650003-at"
+name = "qq-sandbox-345678901-at"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "C:\\chatbot-qq\\groups\\sandbox-987650003"
+work_dir = "C:\\chatbot-qq\\groups\\sandbox-345678901"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"
@@ -136,17 +136,17 @@ allow_from = "*"
 share_session_in_channel = false
 
 [[projects]]
-name = "qq-sandbox-987650002-at"
+name = "qq-sandbox-234567890-at"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "C:\\chatbot-qq\\groups\\sandbox-987650002"
+work_dir = "C:\\chatbot-qq\\groups\\sandbox-234567890"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"
@@ -158,17 +158,17 @@ allow_from = "*"
 share_session_in_channel = false
 
 [[projects]]
-name = "qq-private-1234500002"
+name = "qq-private-100000002"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "C:\\chatbot-qq\\users\\1234500002"
+work_dir = "C:\\chatbot-qq\\users\\100000002"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"
@@ -176,21 +176,21 @@ type = "qq"
 [projects.platforms.options]
 ws_url = "ws://127.0.0.1:3006"
 token = ""
-allow_from = "1234500002"
+allow_from = "100000002"
 share_session_in_channel = false
 
 [[projects]]
-name = "qq-private-1234500003"
+name = "qq-private-100000003"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "C:\\chatbot-qq\\users\\1234500003"
+work_dir = "C:\\chatbot-qq\\users\\100000003"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"
@@ -198,21 +198,21 @@ type = "qq"
 [projects.platforms.options]
 ws_url = "ws://127.0.0.1:3007"
 token = ""
-allow_from = "1234500003"
+allow_from = "100000003"
 share_session_in_channel = false
 
 [[projects]]
-name = "qq-private-1234500004"
+name = "qq-private-100000004"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "C:\\chatbot-qq\\users\\1234500004"
+work_dir = "C:\\chatbot-qq\\users\\100000004"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"
@@ -220,21 +220,21 @@ type = "qq"
 [projects.platforms.options]
 ws_url = "ws://127.0.0.1:3008"
 token = ""
-allow_from = "1234500004"
+allow_from = "100000004"
 share_session_in_channel = false
 
 [[projects]]
-name = "qq-private-1234500005"
+name = "qq-private-100000005"
 reset_on_idle_mins = 30
 
 [projects.agent]
 type = "codex"
 
 [projects.agent.options]
-work_dir = "C:\\chatbot-qq\\users\\1234500005"
+work_dir = "C:\\chatbot-qq\\users\\100000005"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"
@@ -242,5 +242,5 @@ type = "qq"
 [projects.platforms.options]
 ws_url = "ws://127.0.0.1:3009"
 token = ""
-allow_from = "1234500005"
+allow_from = "100000005"
 share_session_in_channel = false

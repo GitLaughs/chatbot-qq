@@ -10,9 +10,9 @@ const { addProposal, updateProposalStatus } = require("./lib/proposal-store");
 const { addTodo, completeTodos } = require("./lib/todo-store");
 const { maskSensitive } = require("./lib/sensitive-redaction");
 
-const GROUP_ID = 9876500001;
-const ADMIN_USER = 1234500001;
-const NORMAL_USER = 1234500002;
+const GROUP_ID = 123456789;
+const ADMIN_USER = 100000001;
+const NORMAL_USER = 100000002;
 
 function main() {
   const options = parseArgs(process.argv.slice(2));

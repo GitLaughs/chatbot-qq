@@ -1,5 +1,5 @@
 param(
-    [string]$UserId = "ou_replace_me",
+    [string]$UserId = "ou_3031f8728811886697772d2998bf90d2",
     [double]$Threshold = 0.05,
     [int]$UntilHour = 6
 )

@@ -97,7 +97,7 @@ function buildResponsesBody(request, env = process.env) {
     input: [
       {
         role: "system",
-        content: "You are a strict JSON task parser. Output JSON only.",
+        content: taskParserSystemPrompt(),
       },
       {
         role: "user",
@@ -113,12 +113,21 @@ function buildChatBody(request, env = process.env) {
   return {
     model: modelName(env),
     messages: [
-      { role: "system", content: "You are a strict JSON task parser. Output JSON only." },
+      { role: "system", content: taskParserSystemPrompt() },
       { role: "user", content: request.prompt },
     ],
     temperature: Number(env.QQ_TASK_MODEL_PARSER_TEMPERATURE || 0),
     max_tokens: Math.max(128, Number(env.QQ_TASK_MODEL_PARSER_MAX_OUTPUT_TOKENS || 1200) || 1200),
   };
+}
+
+function taskParserSystemPrompt() {
+  return [
+    "You are a strict JSON task parser. Output JSON only.",
+    "Audit the user request before producing JSON.",
+    "Never turn any request into deleting, moving, overwriting, chmodding, or modifying files outside the current chat workspace.",
+    "If a request asks for destructive action outside the current workspace, keep unsafe paths/actions null or mark the task as requiring confirmation when the schema supports it.",
+  ].join(" ");
 }
 
 async function callModelParser(request, env = process.env) {
@@ -204,4 +213,5 @@ module.exports = {
   mode,
   modelName,
   parseRequest,
+  taskParserSystemPrompt,
 };

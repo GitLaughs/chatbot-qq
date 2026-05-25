@@ -35,7 +35,7 @@ async function testResponsesMode() {
       };
     });
     const request = buildTaskParseRequest("每天晚上 9 点提醒我检查余额", "scheduled_reminder", {
-      userID: 1234500001,
+      userID: 100000001,
       timezone: "Asia/Shanghai",
       today: "2026-05-25",
     });
@@ -46,7 +46,9 @@ async function testResponsesMode() {
   assert.strictEqual(seen.options.headers.Authorization, "Bearer parser-test-key");
   assert.strictEqual(seen.body.model, "gpt-5.4");
   assert.strictEqual(seen.body.max_output_tokens, 512);
+  assert.match(seen.body.input[0].content, /outside the current chat workspace/);
   assert.match(seen.body.input[1].content, /schedule\.time/);
+  assert.match(seen.body.input[1].content, /不要把任何请求解析成删除、移动、覆盖、改权限或修改当前聊天 workspace 外文件的任务/);
 }
 
 async function testChatMode() {
@@ -68,11 +70,12 @@ async function testChatMode() {
       };
     });
     const request = buildTaskParseRequest("重启 qq bot 服务", "deploy_or_restart", {
-      userID: 1234500001,
+      userID: 100000001,
     });
     const text = await bridge.callModelParser(request, env);
     assert.strictEqual(JSON.parse(bridge.extractJSONText(text)).requires_confirmation, true);
     assert.strictEqual(seen.body.messages[1].content, request.prompt);
+    assert.match(seen.body.messages[0].content, /Never turn any request into deleting/);
   });
   assert.strictEqual(seen.url, "https://parser.example/v1/chat/completions");
 }

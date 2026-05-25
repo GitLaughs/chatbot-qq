@@ -61,7 +61,9 @@ function buildPrompt(request) {
       "只输出 JSON，不要解释，不要 Markdown。",
       "JSON 形如 {\"content\":\"完整修改后的文件内容\"}。",
       "必须返回完整文件内容，不能只返回 diff。",
+      "生成前先审核 spec/source/rules；如果用户要求越界删除或破坏，输出保持原文件内容的安全结果。",
       "不要读取 secrets/env/cookies/token，不要访问其他 workspace，不要新增网络或破坏性行为。",
+      "不要删除、移动、覆盖、改权限或修改当前聊天 workspace 外的任何文件。",
       "",
       "任务 spec:",
       JSON.stringify(request.spec, null, 2),
@@ -77,7 +79,9 @@ function buildPrompt(request) {
     "你是 QQ 自然语言任务代理的脚本生成执行器。",
     "只输出 JSON，不要解释，不要 Markdown。",
     "JSON 形如 {\"code\":\"完整脚本内容\"}。",
+    "生成前先审核 spec/rules；如果用户要求越界删除或破坏，生成安全 no-op 脚本并在注释中说明拒绝原因。",
     "脚本必须适合本地语法检查；若 spec 要 dry_run，应避免网络、外部进程、删除、写 secrets 或跨 workspace 访问。",
+    "脚本不得删除、移动、覆盖、改权限或修改当前聊天 workspace 外的任何文件。",
     "",
     "任务 spec:",
     JSON.stringify(request.spec, null, 2),
@@ -128,7 +132,7 @@ function buildResponsesBody(request, env = process.env) {
   return {
     model: modelName(env),
     input: [
-      { role: "system", content: "You generate safe task artifacts. Output JSON only." },
+      { role: "system", content: artifactSystemPrompt() },
       { role: "user", content: buildPrompt(request) },
     ],
     temperature: Number(env.QQ_TASK_ARTIFACT_MODEL_TEMPERATURE || 0),
@@ -140,12 +144,21 @@ function buildChatBody(request, env = process.env) {
   return {
     model: modelName(env),
     messages: [
-      { role: "system", content: "You generate safe task artifacts. Output JSON only." },
+      { role: "system", content: artifactSystemPrompt() },
       { role: "user", content: buildPrompt(request) },
     ],
     temperature: Number(env.QQ_TASK_ARTIFACT_MODEL_TEMPERATURE || 0),
     max_tokens: Math.max(256, Number(env.QQ_TASK_ARTIFACT_MODEL_MAX_OUTPUT_TOKENS || 4096) || 4096),
   };
+}
+
+function artifactSystemPrompt() {
+  return [
+    "You generate safe task artifacts. Output JSON only.",
+    "Audit the request before generating content.",
+    "Never generate code or file content that deletes, moves, overwrites, chmods, or modifies files outside the current chat workspace.",
+    "If asked to do that, produce a safe no-op or unchanged-content result instead of destructive behavior.",
+  ].join(" ");
 }
 
 async function callArtifactModel(request, env = process.env) {
@@ -225,6 +238,7 @@ if (require.main === module) {
 module.exports = {
   apiBase,
   apiKey,
+  artifactSystemPrompt,
   buildChatBody,
   buildPrompt,
   buildResponsesBody,

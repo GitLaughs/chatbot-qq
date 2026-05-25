@@ -1,0 +1,30 @@
+{
+  "id": "reminder",
+  "title": "提醒",
+  "version": "1.0.0",
+  "api_version": "1",
+  "min_host_version": "0.2.18",
+  "description": "Scheduled reminder delivery plugin.",
+  "homepage": "docs/plugin-platform.md",
+  "repository": "local",
+  "keywords": ["reminder", "schedule", "qq"],
+  "license": "UNLICENSED",
+  "priority": 100,
+  "default_enabled": true,
+  "scope": "system",
+  "permissions": {
+    "required": ["send_message", "schedule"],
+    "optional": []
+  },
+  "hooks": ["onSchedule", "health", "capabilities"],
+  "default_settings": {
+    "interval_ms": 60000
+  },
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "interval_ms": { "type": "integer", "minimum": 10000, "maximum": 3600000 }
+    },
+    "additionalProperties": false
+  }
+}
