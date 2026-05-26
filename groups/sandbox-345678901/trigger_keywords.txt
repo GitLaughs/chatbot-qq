@@ -1,0 +1,2 @@
+# Minimal-listen group. This file is intentionally not used to wake passive
+# 5.4-mini in group 345678901; use ONEBOT_MINIMAL_LISTEN_KEYWORDS instead.

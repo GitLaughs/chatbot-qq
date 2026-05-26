@@ -41,7 +41,7 @@ function runSyntaxCheck({ workspace, filePath, language }) {
 }
 
 function runDryRun({ workspace, filePath, language }) {
-  const safety = scriptSafety(filePath);
+  const safety = scriptSafety(filePath, { workspace, language });
   if (!safety.ok) {
     return { name: "dry_run", status: "failed", detail: safety.reason };
   }
@@ -61,6 +61,8 @@ function runCommandCheck(name, command, workspace) {
       env: {
         ...process.env,
         QQ_TASK_DRY_RUN: "1",
+        QQ_YOLO_WORKSPACE: path.resolve(workspace || ""),
+        QQ_YOLO_SCOPE: "workspace_only",
         NO_COLOR: "1",
       },
     });
@@ -97,7 +99,7 @@ function dryRunCommand(language, filePath) {
   return null;
 }
 
-function scriptSafety(filePath) {
+function scriptSafety(filePath, options = {}) {
   const text = fs.readFileSync(filePath, "utf8");
   const blockers = [
     /\b(rm\s+-rf|del\s+\/[sq]|Remove-Item\b.*\b-Recurse\b|format\s+[A-Z]:)/i,
@@ -106,7 +108,51 @@ function scriptSafety(filePath) {
     /\b(\.env|token|cookie|secret|authorization|api[_-]?key)\b/i,
   ];
   const hit = blockers.find((pattern) => pattern.test(text));
-  return hit ? { ok: false, reason: "dry_run_safety_blocked" } : { ok: true };
+  if (hit) {
+    return { ok: false, reason: "dry_run_safety_blocked" };
+  }
+  const language = options.language || languageFromPath(filePath);
+  if (language === "powershell") {
+    const scoped = powershellYoloScopeSafety(text, options.workspace || path.dirname(filePath));
+    if (!scoped.ok) return scoped;
+  }
+  return { ok: true };
+}
+
+function powershellYoloScopeSafety(text, workspace) {
+  const root = path.resolve(workspace || "");
+  if (!root) {
+    return { ok: false, reason: "yolo_workspace_missing" };
+  }
+  if (/(?:^|[\s"'(;])(?:Env:|\$env:(?:USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP|PATH|HOME)\b)/i.test(text)) {
+    return { ok: false, reason: "yolo_scope_blocked" };
+  }
+  if (/(?:^|[\s"'(;])\.\.[\\/]/.test(text) || /[\\/]\.\.[\\/]/.test(text)) {
+    return { ok: false, reason: "yolo_scope_blocked" };
+  }
+  for (const rawPath of absolutePathLiterals(text)) {
+    const resolved = path.resolve(rawPath);
+    if (!isPathInside(resolved, root)) {
+      return { ok: false, reason: "yolo_scope_blocked" };
+    }
+  }
+  return { ok: true };
+}
+
+function absolutePathLiterals(text) {
+  const paths = [];
+  const value = String(text || "");
+  const pattern = /[A-Za-z]:\\(?:[^"'`\s|;,)]+\\?)+/g;
+  let match;
+  while ((match = pattern.exec(value)) !== null) {
+    paths.push(match[0].replace(/[.,，。；;]+$/u, ""));
+  }
+  return paths;
+}
+
+function isPathInside(targetPath, rootPath) {
+  const rel = path.relative(path.resolve(rootPath), path.resolve(targetPath));
+  return rel === "" || (!!rel && !rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
 function normalizeChecks(checks) {
@@ -131,6 +177,7 @@ function compactError(err) {
 }
 
 module.exports = {
+  powershellYoloScopeSafety,
   runScriptTaskChecks,
   scriptSafety,
 };

@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { expandRelatedMemories, searchGlobalMemories, searchMemoriesRanked } = require("./memory-store");
 const { redactSecrets } = require("./sensitive-redaction");
 
 const lastActivityByScope = new Map();
@@ -93,6 +94,73 @@ function buildReplyChainContext({ workspace, msg }) {
     lines.push(`[${displayName(row)} ${shortTime(row.time)}] ${compact(text, 160)}`);
   }
   return lines.length > 2 ? lines.join("\n") : "";
+}
+
+function buildMemoryContextForMessage({ workspace, messageText, subject, scope, scopeID }) {
+  if (!messageText || messageText.length < 4) return "";
+
+  const enabled = String(process.env.CHATBOT_QQ_MEMORY_INJECT_ENABLED || "true").toLowerCase() !== "false";
+  if (!enabled) return "";
+
+  const threshold = Number(process.env.CHATBOT_QQ_MEMORY_INJECT_THRESHOLD || 20);
+  const limit = Math.max(1, Math.min(10, Number(process.env.CHATBOT_QQ_MEMORY_INJECT_LIMIT || 5)));
+
+  const ranked = searchMemoriesRanked({
+    workspace,
+    query: expandMemoryQuery(messageText),
+    subject: subject || "",
+    scope: scope || "",
+    limit: limit * 2
+  });
+
+  const relevant = ranked.filter((m) => m._score && m._score.total >= threshold).slice(0, limit);
+  const globalRelevant = searchGlobalMemories({ query: messageText, limit: 2 });
+  if (relevant.length === 0 && globalRelevant.length === 0) return "";
+
+  const lines = ["【相关记忆】"];
+  for (const m of relevant) {
+    lines.push(`- [${m.kind}] ${compact(m.text, 120)}`);
+  }
+
+  const expanded = [];
+  const seenIDs = new Set(relevant.map((m) => m.id).filter(Boolean));
+  for (const mem of relevant) {
+    const related = expandRelatedMemories({ workspace, memory: mem, limit: 2 });
+    for (const r of related) {
+      if (r.id && !seenIDs.has(r.id)) {
+        seenIDs.add(r.id);
+        expanded.push(r);
+      }
+    }
+  }
+
+  if (expanded.length > 0) {
+    lines.push("关联记忆：");
+    for (const r of expanded.slice(0, 3)) {
+      lines.push(`  - [${r.kind}] ${compact(r.text, 80)}`);
+    }
+  }
+
+  if (globalRelevant.length > 0) {
+    lines.push("全局知识：");
+    for (const g of globalRelevant) {
+      lines.push(`  - [${g.kind}] ${compact(g.text, 80)}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function expandMemoryQuery(text) {
+  const raw = String(text || "");
+  const extra = [];
+  if (/吃|喝|饭|菜|餐|外卖|夜宵|口味|辣|甜|咸/.test(raw)) {
+    extra.push("喜欢 不喜欢 偏好 口味 吃辣");
+  }
+  if (/怎么回|语气|风格|短答|详细|称呼/.test(raw)) {
+    extra.push("风格 语气 短答 详细 称呼");
+  }
+  return [raw, ...extra].join(" ").trim();
 }
 
 function replyChainMessageIDs({ workspace, msg, maxDepth = 3 }) {
@@ -272,6 +340,7 @@ module.exports = {
   detectGap,
   buildContinuityContext,
   buildReplyChainContext,
+  buildMemoryContextForMessage,
   replyChainMessageIDs,
   activitySnapshot,
   recentChatRows,

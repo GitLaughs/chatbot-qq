@@ -1,7 +1,7 @@
 {
   "max_file_bytes": 2097152,
   "common_exclude_dirs": [".git", "node_modules", "tmp", "backup", "tools", ".cc-connect"],
-  "publish_exclude_dirs": ["memory", "runs", "users"],
+  "publish_exclude_dirs": ["memory", "runs", "users", "local_files"],
   "publish_exclude_file_names": [
     "chatbot-qq-qrcode.png",
     "cc-connect.napcat.local.toml",
@@ -10,11 +10,14 @@
   ],
   "publish_exclude_extensions": [".log", ".sqlite", ".sqlite3", ".db", ".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip"],
   "publish_exclude_path_patterns": [
-    "^groups/[^/]+/(memory|local_files|files)(/|$)"
+    "^groups/[^/]+/(memory|members|local_files|files|\\.cc-connect)(/|$)",
+    "^groups/[^/]+/(GROUP_PROFILE|PROFILE|INSTRUCTIONS|KNOWLEDGE)\\.md$"
   ],
   "publish_exclude_file_name_patterns": [
     "\\.local\\.toml$",
-    "\\.local\\.toml\\.lock$"
+    "\\.local\\.toml\\.lock$",
+    "\\.local\\.toml\\.bak-",
+    "^\\s+$"
   ],
   "forbidden_file_names": ["cc-connect.napcat.local.toml", ".env", "NapCat.json"],
   "patterns": [
@@ -29,6 +32,10 @@
     {
       "name": "runtime memory",
       "regex": "memory[\\\\/].*chat-\\d{4}-\\d{2}-\\d{2}\\.jsonl|members[\\\\/]\\d+\\.md|users[\\\\/]\\d+"
+    },
+    {
+      "name": "windows user profile path",
+      "regex": "C:\\\\Users\\\\[^\\\\\\s\"']+"
     }
   ],
   "allowed_findings": [

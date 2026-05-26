@@ -1,5 +1,5 @@
 param(
-    [string]$Server = "root@example.com",
+    [string]$Server = "root@43.108.37.203",
     [string]$RemoteDir = "/opt/chatbot-qq",
     [string]$RemoteConfigDir = "/root/.cc-connect-qq",
     [switch]$InstallServices,

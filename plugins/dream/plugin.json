@@ -1,0 +1,30 @@
+{
+  "id": "dream",
+  "title": "dream",
+  "version": "1.0.0",
+  "api_version": "1",
+  "min_host_version": "0.2.18",
+  "description": "Group memory digest command plugin.",
+  "homepage": "docs/plugin-platform.md",
+  "repository": "local",
+  "keywords": ["memory", "digest", "qq"],
+  "license": "UNLICENSED",
+  "priority": 90,
+  "default_enabled": true,
+  "scope": "group",
+  "permissions": {
+    "required": ["send_message", "exec_command"],
+    "optional": []
+  },
+  "hooks": ["onMessage", "health", "capabilities"],
+  "default_settings": {
+    "triggers": ["/dream", "做梦"]
+  },
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "triggers": { "type": "array", "items": { "type": "string" } }
+    },
+    "additionalProperties": false
+  }
+}

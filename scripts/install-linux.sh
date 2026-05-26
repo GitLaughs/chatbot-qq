@@ -14,7 +14,7 @@ install_services=0
 install_maintenance=1
 enable_provider_failover=0
 no_npm=0
-health_port="3010"
+health_port="13110"
 admin_user_id=""
 render_font="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 imagemagick_convert="convert"
@@ -156,8 +156,8 @@ type = "codex"
 [projects.agent.options]
 work_dir = "$workspace"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"
@@ -184,8 +184,8 @@ type = "codex"
 [projects.agent.options]
 work_dir = "$private_workspace"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"

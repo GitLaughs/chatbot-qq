@@ -52,3 +52,24 @@ Each meaningful round should:
 
 Avoid always-on heavy workloads. Prefer JSONL, Markdown, and small local indexes. Use LLM calls
 only for explicit commands like `/dream`, admin review, or user-requested complex answers.
+
+## Paper-Informed Memory Shape
+
+The current implementation follows a lightweight version of four agent-memory ideas:
+
+- RAG: keep updateable non-parametric memory outside model weights, but use local JSONL/Markdown
+  search instead of a global vector DB by default.
+  Source: https://arxiv.org/abs/2005.11401
+- MemGPT: treat context as tiers. Fast context is the active chat packet; slow context is
+  `memory/*.jsonl`; compaction moves selected facts into profiles and evidence packets.
+  Source: https://arxiv.org/abs/2310.08560
+- Generative Agents: use observation, reflection, and retrieval as separate phases. In this repo
+  that maps to chat/file logs, `/dream` or profile-update evidence packets, then scoped memory
+  lookup.
+  Source: https://arxiv.org/abs/2304.03442
+- Reflexion: keep task feedback as text for later improvement, but store it as current-workspace
+  proposals, recent errors, and review packets rather than self-editing code automatically.
+  Source: https://arxiv.org/abs/2303.11366
+
+Runtime rule: models should read compact evidence packets for reflection. Raw `memory/chat-*.jsonl`
+is a source for deterministic packet builders and forensic debugging, not the default model input.

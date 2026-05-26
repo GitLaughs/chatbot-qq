@@ -14,11 +14,9 @@ Keywords: QQ bot, QQ group bot, Codex group chat, NapCat, OneBot v11, cc-connect
 - a lightweight listen route can observe allowed group messages with selective trigger rules;
 - an @ route handles explicit bot-directed tasks with a stronger model;
 - private user routing can use an isolated workspace;
-- `/help` returns grouped, compact help with keyword search for QQ message boxes;
-- natural-language task handling covers reminders, weekly rota, file edits, script generation, deploy confirmation, task receipts, and upload outbox tracking;
-- memory commands cover remembering, lookup, evidence, profiles, forgetting, and pending-memory review;
 - `/dream` and `做梦` provide bounded workspace maintenance;
 - `/画图`, `/生图`, `/img`, `画图`, and `生图` provide image generation when provider keys are configured;
+- plugin-scoped features live under `plugins/<id>/` and are managed by `scripts/lib/plugin-manager.js`;
 - long replies and formula-heavy replies can be rendered to PNG before sending;
 - Linux service, health, cleanup, and integrity-check timers keep the deployment inspectable.
 
@@ -37,7 +35,7 @@ This project keeps the current NapCat / OneBot + onebot-group-proxy + cc-connect
 |---|---|---|---|
 | Listen route | `gpt-5.4-mini` by default | allowed group messages with selective trigger rules | classify, stay quiet, handle light work, organize workspace context |
 | @ route | `gpt-5.4` by default | explicit @ / directed tasks | handle complex tasks directly |
-| Private route | `gpt-5.4` by default; admin `1234500001` stays `gpt-5.5` | allowed private user messages | handle isolated private work |
+| Private route | `gpt-5.4` by default; admin `100000001` stays `gpt-5.5` | allowed private user messages | handle isolated private work |
 
 Official QQ Bot code and docs remain fallback or historical reference only.
 
@@ -67,12 +65,9 @@ flowchart LR
 - Separate mini and deep cc-connect projects with independent session behavior.
 - Optional private-user route with an isolated workspace.
 - Static `/dream` / `做梦` workspace maintenance command.
-- Message-box-friendly `/help` output with command groups and keyword search.
-- Natural-language task agent for reminders, weekly rota tasks, file modification, script generation, confirmed deploy/restart tasks, task receipts, and file upload outbox tracking.
-- Memory management commands for `/记住`, `/记忆`, `/证据`, `/画像`, `/忘记`, `/候选记忆`, candidate apply/skip, and compact evidence packets.
-- Conversation continuity, group energy/mood tracking, feedback statistics, and proactive participation controls.
 - Group recurring rota reminders such as weekly duty rotation, created from chat with `/提醒 ...` or explicit @ requests.
 - Platform-layer image generation commands through `scripts/generate-image.js`.
+- Plugin platform with manifest validation, scoped config, admin commands, capability gates, and plugin-local tests.
 - MathJax/SVG renderer for long answers and formula-heavy QQ replies.
 - Health endpoint, outgoing send retry settings, and redacted diagnostics.
 - Linux installer for `/opt/chatbot-qq`, `/root/.cc-connect-qq/config.toml`, and `/etc/chatbot-qq.env`.
@@ -89,7 +84,7 @@ flowchart LR
 - Node.js 20 or newer and npm
 - `cc-connect` installed globally
 - NapCat logged in to QQ
-- OneBot v11 WebSocket exposed locally, normally `ws://127.0.0.1:3001`
+- OneBot v11 WebSocket exposed locally. The Windows helper scripts use `ws://127.0.0.1:13001`; Linux service examples can still point at a custom NapCat port.
 - Optional ImageMagick, librsvg2-bin, and Noto CJK fonts for PNG rendering
 
 Install `cc-connect`:
@@ -103,29 +98,31 @@ cc-connect --version
 
 Start NapCat, log in to QQ, and enable OneBot v11 WebSocket.
 
-Default local endpoint:
+Windows helper endpoint:
 
 ```text
-ws://127.0.0.1:3001
+ws://127.0.0.1:13001
 ```
 
 The QQ route uses NapCat / OneBot as the active implementation path. See [docs/napcat-setup.md](docs/napcat-setup.md) for setup notes. See [docs/qqbot-auth-and-setup.md](docs/qqbot-auth-and-setup.md) only if you explicitly need the official QQ Bot fallback path.
 
 ## Quick Start
 
-Clone or copy this repository, then run on Windows:
+Clone this repository, then run on Windows:
 
 ```powershell
+git clone https://github.com/GitLaughs/chatbot-qq.git C:\chatbot-qq
 cd C:\chatbot-qq
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -NoStart
 ```
 
-Start the OneBot proxy:
+Start NapCat and the OneBot proxy:
 
 ```powershell
-$env:ONEBOT_ALLOWED_GROUPS="123456789"
-$env:ONEBOT_PROXY_PORTS="3002,3003"
-node .\scripts\onebot-group-proxy.js
+$env:NAPCAT_QQ="1234567890"
+$env:NAPCAT_ROOT="C:\chatbot-qq\tools\NapCat.Shell.Windows.OneKey\NapCat.Shell"
+.\scripts\run-napcat-local.cmd
+.\scripts\run-onebot-group-proxy.cmd
 ```
 
 Start cc-connect:
@@ -134,19 +131,15 @@ Start cc-connect:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-cc-connect-napcat.ps1
 ```
 
-Run on Linux as root, or with `sudo` as shown here:
+If you already use a hidden Windows startup wrapper, keep one central wrapper and point it at `scripts\run-napcat-local.cmd`, `scripts\run-onebot-group-proxy.cmd`, and the QQ cc-connect config. Do not add a second QQ-only startup wrapper.
+
+Run on Linux:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y git curl ca-certificates imagemagick librsvg2-bin fonts-noto-cjk
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-sudo npm install -g cc-connect
-sudo git clone https://github.com/GitLaughs/chatbot-qq.git /opt/chatbot-qq
+git clone https://github.com/GitLaughs/chatbot-qq.git /opt/chatbot-qq
 cd /opt/chatbot-qq
-sudo bash ./scripts/install-linux.sh --install-services
-sudo systemctl start onebot-group-proxy cc-connect-qq
-sudo systemctl start chatbot-qq-profile-update.timer chatbot-qq-integrity-check.timer chatbot-qq-cleanup.timer
+bash ./scripts/install-linux.sh --install-services
+systemctl start onebot-group-proxy cc-connect-qq
 ```
 
 The installer asks for:
@@ -189,7 +182,7 @@ bash ./scripts/install-linux.sh \
   --listen-port 3002 \
   --at-port 3003 \
   --private-port 3006 \
-  --health-port 3010 \
+  --health-port 13110 \
   --install-services
 ```
 
@@ -203,9 +196,34 @@ bash ./scripts/install-linux.sh --install-services --enable-provider-failover --
 
 Enable provider failover only after matching providers exist in `config.toml`.
 
+## Plugins
+
+New bot features should be packaged as plugins when practical. Built-in examples include:
+
+- `plugins/dream`: bounded workspace maintenance triggers.
+- `plugins/image`: image generation trigger handling.
+- `plugins/reminder`: recurring reminder hooks.
+
+Create a plugin scaffold:
+
+```powershell
+npm run create:plugin -- my-plugin
+```
+
+Copy `configs/plugins.example.json` to `configs/plugins.json` for shared non-secret defaults, or write machine-specific overrides to `.cc-connect/plugins.local.json`. Local plugin config can enable/disable plugins, scope groups or private users, and tune settings without adding more top-level `ONEBOT_*` globals.
+
+Useful checks:
+
+```powershell
+npm run test:plugins
+npm run plugin:check
+```
+
+See [docs/plugin-platform.md](docs/plugin-platform.md) for manifest fields, hook contracts, permissions, admin commands, and testing rules.
+
 ## OpenToken Subscription Monitor
 
-Use `scripts/monitor-opentoken-subscriptions.js` to read otokapi.com purchase plans and send a Feishu alert when a configured price or ratio field is below the threshold. It only calls the read-only payment plans endpoint and does not call payment or order APIs. If no token is configured, the script can reuse the local Chrome/Edge `otokapi.com` login token for this read-only check.
+Use `scripts/monitor-opentoken-subscriptions.js` to read otokapi.com purchase plans and send a chat alert when a configured price or ratio field is below the threshold. It only calls the read-only payment plans endpoint and does not call payment or order APIs. If no token is configured, the script can reuse the local Chrome/Edge `otokapi.com` login token for this read-only check.
 
 ```powershell
 $env:LARK_CHAT_ID = "oc_xxx"
@@ -214,7 +232,7 @@ npm run monitor:opentoken-subscriptions -- --dry-run --threshold 10
 npm run monitor:opentoken-subscriptions -- --watch --threshold 0.05
 ```
 
-See [docs/opentoken-subscription-monitor.md](docs/opentoken-subscription-monitor.md) for webhook, `lark-cli`, loop, and scheduled-task usage.
+See [docs/opentoken-subscription-monitor.md](docs/opentoken-subscription-monitor.md) for webhook, loop, and scheduled-task usage.
 
 ## Expected Chat Behavior
 
@@ -302,6 +320,7 @@ Expected:
   configs/
     cc-connect.napcat.example.toml
     cc-connect.napcat.server.example.toml
+    plugins.example.json
     private-data-audit-rules.json
   deploy/
     linux/
@@ -313,6 +332,10 @@ Expected:
     server-deploy.md
   groups/
     default/
+  plugins/
+    dream/
+    image/
+    reminder/
   scripts/
     install.ps1
     install-linux.sh
@@ -331,6 +354,7 @@ Expected:
 - [Linux 中文安装教程](docs/install-linux.zh-CN.md)
 - [NapCat setup](docs/napcat-setup.md)
 - [Server deploy](docs/server-deploy.md)
+- [Plugin platform](docs/plugin-platform.md)
 - [QQ bot integration plan](docs/qqbot-integration-plan.md)
 - [Official QQ Bot fallback setup](docs/qqbot-auth-and-setup.md)
 - [Daily group product plan](docs/daily-group-product-plan.md)

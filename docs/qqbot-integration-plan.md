@@ -35,7 +35,7 @@ Session keys:
 
 Workspace layout:
 
-- sandbox group `9876500001` maps to `C:\chatbot-qq\groups\sandbox-9876500001`
+- sandbox group `123456789` maps to `C:\chatbot-qq\groups\sandbox-123456789`
 - each later QQ group can map to `C:\chatbot-qq\groups\<name>` or another cc-connect-managed workspace root
 - group memories follow the existing `KNOWLEDGE.md`, `local_files/INDEX.md`, `memory/YYYY-MM-DD.md` pattern
 
@@ -52,13 +52,13 @@ Workspace layout:
 - Prefer deterministic commands and JSONL/Markdown state over per-message model work.
 - Every meaningful upgrade should stay current-workspace scoped unless explicitly requested otherwise.
 - Use sub-agent review for ideas and risks, but do not let review agents change the architecture toward official QQ Bot, vector databases, always-on local LLMs, per-message summaries, recursive self-deploy, or broad cross-group search.
-- Admin `1234500001` can control the bot through private admin routes, while ordinary chat and memory behavior stays scoped like normal users.
+- Admin `100000001` can control the bot through private admin routes, while ordinary chat and memory behavior stays scoped like normal users.
 
 ## Milestones
 
 1. NapCat starts and QQ account logs in by QR.
-2. OneBot v11 WebSocket is reachable at `ws://127.0.0.1:3001`.
+2. OneBot v11 WebSocket is reachable at `ws://127.0.0.1:13001` for the Windows helper scripts.
 3. `configs/cc-connect.napcat.local.toml` is created locally.
 4. cc-connect starts with `platform ready` for `qq`.
-5. Group `9876500001` message reaches `qq-sandbox-9876500001`.
+5. Group `123456789` message reaches `qq-sandbox-123456789`.
 6. Text reply works from cc-connect through NapCat.

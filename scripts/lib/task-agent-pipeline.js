@@ -3,11 +3,14 @@
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
-const { parseTaskWithModel } = require("../task-agent");
+const { normalizeModelResult, parseCourseScheduleHeuristic, parseTaskWithModel } = require("../task-agent");
+const { createCourseScheduleFromSpec, formatCourseScheduleCreated, validateCourseScheduleSpec } = require("./course-scheduler");
 const { createReminderFromSpec, formatReminderCreated, validateReminderSpec } = require("./reminder-scheduler");
 const { prepareFileModifyTask } = require("./file-task-prep");
 const { prepareScriptCreateTask } = require("./script-task-prep");
 const { runScriptTaskChecks } = require("./script-task-checker");
+const { executeAcademicAssist } = require("./academic-assistant");
+const { addCapabilityGapProposal } = require("./growth-loop");
 const { createRotaFromText, formatRotaFallbackFailure } = require("./rota-task-fallback");
 const { classifyTask } = require("./task-intent-router");
 const { createTaskRequest, updateTaskRequest, writeTaskReceipt } = require("./task-request-store");
@@ -16,6 +19,8 @@ const EXECUTORS = {
   deploy_or_restart: executeDeployOrRestart,
   weekly_rota: executeWeeklyRota,
   scheduled_reminder: executeScheduledReminder,
+  course_schedule: executeCourseSchedule,
+  academic_assist: executeAcademicAssistTask,
 };
 
 function executeNaturalTask({ text, msg, workspace, context = {}, options = {} }) {
@@ -33,8 +38,9 @@ function executeNaturalTask({ text, msg, workspace, context = {}, options = {} }
     timezone: options.timezone,
     today: options.today,
     startDate: options.startDate,
+    sourceImages: context.sourceImages,
   });
-  parsed = prepareParsedTask({ parsed, route, workspace, text });
+  parsed = prepareParsedTask({ parsed, route, workspace, text, context, options });
   const taskRequest = createTaskRequest({
     workspace,
     scope: context.scope,
@@ -48,7 +54,7 @@ function executeNaturalTask({ text, msg, workspace, context = {}, options = {} }
     status: hasMissingFields(parsed) ? "awaiting_input" : (executor ? "running" : "delegated"),
   });
   if (hasMissingFields(parsed)) {
-    const question = missingFieldQuestion(route.task_type, parsed.missing);
+    const question = missingFieldQuestion(route.task_type, parsed.missing, parsed);
     writeTaskReceipt({
       workspace,
       id: taskRequest && taskRequest.id,
@@ -70,6 +76,7 @@ function executeNaturalTask({ text, msg, workspace, context = {}, options = {} }
       result: { ok: false, reason: "missing_fields", missing: parsed.missing },
       spec: parsed.spec,
     });
+    maybeRecordMissingFieldGap({ workspace, route, parsed, context, msg });
     return {
       handled: true,
       ok: false,
@@ -159,11 +166,27 @@ function executeNaturalTask({ text, msg, workspace, context = {}, options = {} }
   }
 }
 
+function maybeRecordMissingFieldGap({ workspace, route, parsed, context = {}, msg = null }) {
+  if (!route || !parsed || !parsed.spec) return null;
+  if (route.task_type === "course_schedule" && parsed.spec.source_type === "image" && (parsed.missing || []).some((field) => /entries/.test(field))) {
+    return addCapabilityGapProposal({
+      workspace,
+      scope: context.scope,
+      scopeID: context.scopeID,
+      userID: context.userID,
+      sourceMessageID: msg && msg.message_id,
+      gap: "course_screenshot_ocr",
+      evidence: "course_schedule image import is waiting for OCR text",
+    });
+  }
+  return null;
+}
+
 function hasMissingFields(parsed) {
   return Boolean(parsed && parsed.ok && Array.isArray(parsed.missing) && parsed.missing.length > 0);
 }
 
-function missingFieldQuestion(taskType, missing = []) {
+function missingFieldQuestion(taskType, missing = [], parsed = null) {
   const first = String((missing || [])[0] || "");
   if (taskType === "file_modify_and_return") {
     if (first === "source_file") return "我已经识别到这是文件修改任务，但还缺源文件。请上传文件，或直接发当前 workspace 下的 local_files/ 或 received_files/ 路径。";
@@ -179,13 +202,27 @@ function missingFieldQuestion(taskType, missing = []) {
     if (/time/.test(first)) return "我已经识别到这是定时提醒任务，但还缺提醒时间。你要几点提醒？";
     if (/message/.test(first)) return "我已经识别到这是定时提醒任务，但还缺提醒内容。要提醒什么？";
   }
+  if (taskType === "course_schedule") {
+    if (/owner_user_id/.test(first)) return "我已经识别到这是课程表导入任务，但还缺提醒对象。默认按发送人创建，可以确认 QQ 号吗？";
+    if (/entries/.test(first) && parsed && parsed.spec && parsed.spec.source_type === "image") {
+      return [
+        "收到课表截图，已登记为课程表导入任务，但当前还缺可解析的课程文字。",
+        "请直接回复识别后的课表文字，例如：周一 08:00-09:40 高数 @A101；周三 14:00-15:40 数电 @实验楼。",
+        "收到后会按发送人作为提醒对象导入，并默认课前 20 分钟 @ 提醒。"
+      ].join("\n");
+    }
+    if (/entries/.test(first)) return "我已经识别到这是课程表导入任务，但还缺课程条目。请按“周一 08:00-09:40 高数 @教室”发。";
+  }
   if (taskType === "deploy_or_restart") {
     if (first === "target") return "我已经识别到这是部署/重启任务，但还缺目标服务。是 qq-bot 还是别的目标？";
+  }
+  if (taskType === "academic_assist") {
+    if (first === "request") return "我已经识别到这是学术助手任务，但还缺题目、实验要求、数据或 netlist 描述。请补充原始内容。";
   }
   return `我已经识别到这是 ${taskType || "任务"}，但还缺 ${first || "必要字段"}。请补充这一项。`;
 }
 
-function prepareParsedTask({ parsed, route, workspace, text }) {
+function prepareParsedTask({ parsed, route, workspace, text, context = {}, options = {} }) {
   if (!parsed || !parsed.ok || !parsed.spec || !route) {
     return parsed;
   }
@@ -193,6 +230,20 @@ function prepareParsedTask({ parsed, route, workspace, text }) {
     const checked = validateReminderSpec(parsed.spec);
     return {
       ...parsed,
+      missing: checked.ok ? [] : checked.missing,
+    };
+  }
+  if (route.task_type === "course_schedule") {
+    let spec = {
+      ...parsed.spec,
+      owner_user_id: parsed.spec.owner_user_id || (context.userID !== undefined ? String(context.userID) : ""),
+      source_images: [...new Set([...(parsed.spec.source_images || []), ...(context.sourceImages || [])].map(String).filter(Boolean))].slice(0, 8),
+    };
+    spec = maybeApplyCourseOcr({ workspace, text, spec, context, options });
+    const checked = validateCourseScheduleSpec(spec);
+    return {
+      ...parsed,
+      spec: checked.schedule,
       missing: checked.ok ? [] : checked.missing,
     };
   }
@@ -215,6 +266,118 @@ function prepareParsedTask({ parsed, route, workspace, text }) {
     missing: prepared.ok ? [] : prepared.errors.map((item) => item.field),
     prepared,
   };
+}
+
+function maybeApplyCourseOcr({ workspace, text, spec, context = {}, options = {} }) {
+  if (!spec || spec.source_type !== "image" || (Array.isArray(spec.entries) && spec.entries.length > 0)) {
+    return spec;
+  }
+  const command = courseOcrCommand(options);
+  if (!command) {
+    return spec;
+  }
+  const sourceImages = Array.isArray(spec.source_images) ? spec.source_images : [];
+  if (sourceImages.length === 0 && !/\[图片\]/.test(text)) {
+    return spec;
+  }
+  const ocr = runCourseOcrCommand({ command, workspace, text, spec, context, options });
+  if (!ocr.ok) {
+    return {
+      ...spec,
+      ocr_status: "failed",
+      ocr_error: ocr.reason,
+    };
+  }
+  if (ocr.spec) {
+    return {
+      ...spec,
+      ...ocr.spec,
+      owner_user_id: ocr.spec.owner_user_id || spec.owner_user_id,
+      morning_time: ocr.spec.morning_time || spec.morning_time,
+      morning_enabled: ocr.spec.morning_enabled !== undefined ? ocr.spec.morning_enabled : spec.morning_enabled,
+      reminder_minutes_before: ocr.spec.reminder_minutes_before || spec.reminder_minutes_before,
+      source_type: "image",
+      source_images: sourceImages,
+      source_text: [spec.source_text, `OCR：${ocr.raw_text || ""}`].filter(Boolean).join("\n").slice(0, 2000),
+      ocr_status: "parsed",
+    };
+  }
+  const ocrText = String(ocr.text || "").trim();
+  if (!ocrText) {
+    return { ...spec, ocr_status: "empty" };
+  }
+  const parsed = normalizeModelResult(parseCourseScheduleHeuristic(`${text}\n${ocrText}`, {
+    ...context,
+    sourceImages,
+  }), "course_schedule");
+  if (!parsed.ok || !parsed.spec) {
+    return { ...spec, ocr_status: "parse_failed", ocr_text: ocrText.slice(0, 1000) };
+  }
+  return {
+    ...spec,
+    ...parsed.spec,
+    owner_user_id: parsed.spec.owner_user_id || spec.owner_user_id,
+    source_type: "image",
+    source_images: sourceImages,
+    source_text: [spec.source_text, `OCR：${ocrText}`].filter(Boolean).join("\n").slice(0, 2000),
+    ocr_status: "parsed",
+  };
+}
+
+function runCourseOcrCommand({ command, workspace, text, spec, context = {}, options = {} }) {
+  const request = {
+    version: 1,
+    role: "course_schedule_ocr",
+    message: text,
+    source_images: spec.source_images || [],
+    context: {
+      scope: context.scope,
+      scopeID: context.scopeID,
+      userID: context.userID,
+      groupID: context.groupID,
+      workspace,
+    },
+    rules: [
+      "Extract only timetable text or JSON course_schedule spec.",
+      "Do not read secrets, tokens, cookies, .env files, or other workspaces.",
+      "Do not create reminders; return data only.",
+    ],
+  };
+  const result = spawnSync(command.file, command.args, {
+    input: `${JSON.stringify(request)}\n`,
+    encoding: "utf8",
+    cwd: workspace,
+    timeout: Math.max(1000, Number(options.courseOcrTimeoutMs || process.env.QQ_COURSE_OCR_TIMEOUT_MS || 15000) || 15000),
+    windowsHide: true,
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  if (result.error) {
+    return { ok: false, reason: result.error.code === "ETIMEDOUT" ? "ocr_timeout" : "ocr_failed" };
+  }
+  if (result.status !== 0) {
+    return { ok: false, reason: "ocr_failed", detail: compact(result.stderr || result.stdout || `exit ${result.status}`) };
+  }
+  const stdout = String(result.stdout || "").trim();
+  if (!stdout) return { ok: true, text: "" };
+  try {
+    const parsed = JSON.parse(stdout);
+    if (parsed && parsed.ok === false) {
+      return { ok: false, reason: parsed.reason || "ocr_failed", detail: compact(parsed.detail || "") };
+    }
+    if (parsed && typeof parsed.text === "string") return { ok: true, text: parsed.text, raw_text: parsed.text };
+    if (parsed && typeof parsed.ocr_text === "string") return { ok: true, text: parsed.ocr_text, raw_text: parsed.ocr_text };
+    if (parsed && typeof parsed === "object") {
+      const normalized = normalizeModelResult(parsed.spec && typeof parsed.spec === "object" ? parsed.spec : parsed, "course_schedule");
+      if (normalized.ok) return { ok: true, spec: normalized.spec, raw_text: stdout };
+    }
+  } catch {
+    // Treat plain stdout as OCR text.
+  }
+  return { ok: true, text: stdout, raw_text: stdout };
+}
+
+function courseOcrCommand(options = {}) {
+  return normalizeCommand(options.courseOcrCommand || process.env.QQ_COURSE_OCR_COMMAND || "");
 }
 
 function withTaskReplyMetadata(result, taskRequest) {
@@ -404,6 +567,52 @@ function executeScheduledReminder({ text, workspace, context, parsed }) {
   };
 }
 
+function executeCourseSchedule({ text, workspace, context, parsed }) {
+  const created = createCourseScheduleFromSpec(workspace, {
+    ...parsed.spec,
+    source_text: parsed.spec.source_text || text,
+  }, {
+    scope: context.scope,
+    scopeID: context.scopeID,
+    userID: context.userID,
+  });
+  if (created.ok) {
+    return {
+      handled: true,
+      ok: true,
+      task_type: "course_schedule",
+      item: created.item,
+      reply: formatCourseScheduleCreated(created.item),
+    };
+  }
+  if (created.reason === "duplicate") {
+    return {
+      handled: true,
+      ok: false,
+      task_type: "course_schedule",
+      reason: "duplicate",
+      reply: "已有相同课程表，暂不重复创建。",
+    };
+  }
+  const first = (created.errors || [])[0];
+  return {
+    handled: true,
+    ok: false,
+    task_type: "course_schedule",
+    reason: created.reason || "invalid",
+    reply: first ? `课程表解析到了，但字段不合法：${first.field} ${first.message}` : "课程表解析到了，但缺少必要字段。",
+  };
+}
+
+function executeAcademicAssistTask({ text, workspace, context, parsed }) {
+  return executeAcademicAssist({
+    workspace,
+    spec: parsed && parsed.spec || {},
+    text,
+    context,
+  });
+}
+
 function executeDeployOrRestart({ parsed, route }) {
   const spec = parsed && parsed.spec ? parsed.spec : {};
   return {
@@ -566,6 +775,7 @@ function runFileModifierCommand({ command, workspace, spec, sourceContent, optio
     rules: [
       "Only output modified file content or JSON with a content/code field.",
       "Do not read secrets, tokens, cookies, .env files, or other workspaces.",
+      "Do not delete, move, overwrite, chmod, or modify any file outside the current chat workspace.",
       "Keep the output compatible with the original file type unless instructed otherwise.",
     ],
   };
@@ -610,6 +820,7 @@ function runScriptGeneratorCommand({ command, workspace, spec, options = {} }) {
     rules: [
       "Only output script content or JSON with a code field.",
       "Do not read secrets, tokens, cookies, .env files, or other workspaces.",
+      "Do not delete, move, overwrite, chmod, or modify any file outside the current chat workspace.",
       "The script must be safe for syntax check and optional dry run.",
     ],
   };

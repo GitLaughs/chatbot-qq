@@ -6,6 +6,18 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$pythonRenderer = Join-Path $PSScriptRoot "render-qq-card-mathtext.py"
+if ((Test-Path -LiteralPath $pythonRenderer) -and -not ($env:ONEBOT_RENDER_DISABLE_MATHTEXT -in @("1", "true", "yes"))) {
+    $python = (Get-Command python -ErrorAction SilentlyContinue)
+    if ($python) {
+        & $python.Source $pythonRenderer --text $TextPath --out $OutPath --title $Title --width $Width
+        if ($LASTEXITCODE -eq 0) {
+            exit 0
+        }
+    }
+}
+
 Add-Type -AssemblyName System.Drawing
 
 $text = Get-Content -LiteralPath $TextPath -Raw -Encoding UTF8

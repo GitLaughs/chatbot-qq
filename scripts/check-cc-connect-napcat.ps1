@@ -9,7 +9,7 @@ cc-connect --version
 
 Write-Host ""
 Write-Host "== NapCat ports =="
-Get-NetTCPConnection -LocalPort 3001,6099 -ErrorAction SilentlyContinue |
+Get-NetTCPConnection -LocalPort 13001,6099 -ErrorAction SilentlyContinue |
     Select-Object LocalAddress, LocalPort, State, OwningProcess |
     Format-Table -AutoSize
 

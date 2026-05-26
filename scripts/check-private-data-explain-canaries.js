@@ -27,14 +27,14 @@ const canaries = [
   },
   {
     scope: "Publish",
-    path: "users/" + "1234500001/README.md",
+    path: "users/" + "100000001/README.md",
     scanned: false,
     reasonType: "publish_exclude_dir",
     reasonValue: "users"
   },
   {
     scope: "Publish",
-    path: "users/" + "1234500001",
+    path: "users/" + "100000001",
     isDirectory: true,
     scanned: false,
     reasonType: "publish_exclude_dir",
@@ -42,73 +42,88 @@ const canaries = [
   },
   {
     scope: "Publish",
-    path: "groups/sandbox-9876500001/README.md",
+    path: "groups/sandbox-123456789/README.md",
     scanned: true,
     reasonType: null
   },
   {
     scope: "Publish",
-    path: "groups/sandbox-9876500001/AGENTS.md",
+    path: "groups/sandbox-123456789/AGENTS.md",
     scanned: true,
     reasonType: null
   },
   {
     scope: "Publish",
-    path: "groups/sandbox-9876500001/scripts/tool.js",
+    path: "groups/sandbox-123456789/scripts/tool.js",
     scanned: true,
     reasonType: null
   },
   {
     scope: "Publish",
-    path: "groups/sandbox-9876500001",
+    path: "groups/sandbox-123456789",
     isDirectory: true,
     scanned: true,
     reasonType: null
   },
   {
     scope: "Publish",
-    path: "groups/sandbox-9876500001/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
+    path: "groups/sandbox-123456789/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
     scanned: false,
     reasonType: "publish_exclude_path_pattern",
-    reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+    reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
   },
   {
     scope: "Publish",
-    path: "groups/sandbox-9876500001/" + "memory",
+    path: "groups/sandbox-123456789/" + "memory",
     isDirectory: true,
     scanned: false,
     reasonType: "publish_exclude_path_pattern",
-    reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+    reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
   },
   {
     scope: "Publish",
-    path: "groups/sandbox-9876500001/local_files/upload.txt",
+    path: "groups/sandbox-123456789/" + "members/" + "100000001.md",
     scanned: false,
     reasonType: "publish_exclude_path_pattern",
-    reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+    reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
   },
   {
     scope: "Publish",
-    path: "groups/sandbox-9876500001/local_files",
+    path: "groups/sandbox-123456789/members",
     isDirectory: true,
     scanned: false,
     reasonType: "publish_exclude_path_pattern",
-    reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+    reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
   },
   {
     scope: "Publish",
-    path: "groups/sandbox-9876500001/files/upload.txt",
+    path: "groups/sandbox-123456789/local_files/upload.txt",
     scanned: false,
     reasonType: "publish_exclude_path_pattern",
-    reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+    reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
   },
   {
     scope: "Publish",
-    path: "groups/sandbox-9876500001/files",
+    path: "groups/sandbox-123456789/local_files",
     isDirectory: true,
     scanned: false,
     reasonType: "publish_exclude_path_pattern",
-    reasonValue: "^groups\\/[^/]+\\/(memory|local_files|files)(\\/|$)"
+    reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
+  },
+  {
+    scope: "Publish",
+    path: "groups/sandbox-123456789/files/upload.txt",
+    scanned: false,
+    reasonType: "publish_exclude_path_pattern",
+    reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
+  },
+  {
+    scope: "Publish",
+    path: "groups/sandbox-123456789/files",
+    isDirectory: true,
+    scanned: false,
+    reasonType: "publish_exclude_path_pattern",
+    reasonValue: "^groups\\/[^/]+\\/(memory|members|local_files|files|\\.cc-connect)(\\/|$)"
   },
   {
     scope: "Live",
@@ -124,52 +139,52 @@ const canaries = [
   },
   {
     scope: "Live",
-    path: "users/" + "1234500001/README.md",
+    path: "users/" + "100000001/README.md",
     scanned: true,
     reasonType: null
   },
   {
     scope: "Live",
-    path: "users/" + "1234500001",
+    path: "users/" + "100000001",
     isDirectory: true,
     scanned: true,
     reasonType: null
   },
   {
     scope: "Live",
-    path: "groups/sandbox-9876500001/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
+    path: "groups/sandbox-123456789/" + "memory/" + "cha" + "t-2026-05-24.jsonl",
     scanned: true,
     reasonType: null
   },
   {
     scope: "Live",
-    path: "groups/sandbox-9876500001/" + "memory",
+    path: "groups/sandbox-123456789/" + "memory",
     isDirectory: true,
     scanned: true,
     reasonType: null
   },
   {
     scope: "Live",
-    path: "groups/sandbox-9876500001/local_files/upload.txt",
+    path: "groups/sandbox-123456789/local_files/upload.txt",
     scanned: true,
     reasonType: null
   },
   {
     scope: "Live",
-    path: "groups/sandbox-9876500001/local_files",
+    path: "groups/sandbox-123456789/local_files",
     isDirectory: true,
     scanned: true,
     reasonType: null
   },
   {
     scope: "Live",
-    path: "groups/sandbox-9876500001/files/upload.txt",
+    path: "groups/sandbox-123456789/files/upload.txt",
     scanned: true,
     reasonType: null
   },
   {
     scope: "Live",
-    path: "groups/sandbox-9876500001/files",
+    path: "groups/sandbox-123456789/files",
     isDirectory: true,
     scanned: true,
     reasonType: null

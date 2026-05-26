@@ -1,0 +1,36 @@
+{
+  "plugins": {
+    "dream": {
+      "enabled": true,
+      "settings": {
+        "triggers": ["/dream", "做梦"]
+      },
+      "groups": {
+        "allow": ["*"],
+        "deny": []
+      }
+    },
+    "image": {
+      "enabled": true,
+      "settings": {
+        "triggers": ["/画图", "/生图", "/img", "画图", "生图"],
+        "max_concurrent_per_group": 2,
+        "queue_max_per_group": 20
+      },
+      "groups": {
+        "allow": ["*"],
+        "deny": []
+      },
+      "private_users": {
+        "allow": ["*"],
+        "deny": []
+      }
+    },
+    "reminder": {
+      "enabled": true,
+      "settings": {
+        "interval_ms": 60000
+      }
+    }
+  }
+}

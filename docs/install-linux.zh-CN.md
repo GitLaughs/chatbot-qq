@@ -11,28 +11,22 @@
 - OneBot v11 WebSocket 监听 `ws://127.0.0.1:3001`
 - 可选：ImageMagick、librsvg2-bin 与 Noto CJK 字体，用于把长回复、公式回复渲染成 QQ 图片
 
-如果你是新手，建议先在服务器终端里按顺序执行下面的基础命令。以下示例面向 Debian/Ubuntu，其他发行版只需要替换系统包管理命令：
+安装依赖：
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y git curl ca-certificates imagemagick librsvg2-bin fonts-noto-cjk
-
-# 如果服务器还没有 Node.js 20+，先安装 Node.js 20。
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-sudo npm install -g cc-connect
+npm install -g cc-connect
 cc-connect --version
-node --version
-npm --version
+# Debian/Ubuntu，可选但推荐
+apt-get update
+apt-get install -y imagemagick librsvg2-bin fonts-noto-cjk
 ```
 
 ## 安装
 
 ```bash
-sudo git clone https://github.com/GitLaughs/chatbot-qq.git /opt/chatbot-qq
+git clone https://github.com/GitLaughs/chatbot-qq.git /opt/chatbot-qq
 cd /opt/chatbot-qq
-sudo bash ./scripts/install-linux.sh --install-services
+bash ./scripts/install-linux.sh --install-services
 ```
 
 脚本会询问：
@@ -51,7 +45,7 @@ sudo bash ./scripts/install-linux.sh --install-services
 
 默认新手安装会写入这些云端 Linux 运行参数：
 
-- OneBot 健康检查端口：`127.0.0.1:3010`
+- OneBot 健康检查端口：`127.0.0.1:13110`
 - 发送失败重试与超时参数
 - 长回复/公式回复的 ImageMagick 渲染路径
 - `/dream`、`做梦`、`/画图`、`/生图`、`/img` 命令开关
@@ -166,7 +160,7 @@ systemctl restart chatbot-qq-profile-update.timer chatbot-qq-integrity-check.tim
 ```bash
 systemctl restart onebot-group-proxy cc-connect-qq
 systemctl is-active onebot-group-proxy cc-connect-qq
-curl -fsS http://127.0.0.1:3010/healthz
+curl -fsS http://127.0.0.1:13110/healthz
 ```
 
 还要在真实 QQ 私聊或群聊里验证文件/PDF、图片渲染、`/status`、`/画像`、`/记住` 和服务重启恢复。

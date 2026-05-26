@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$Archive,
-    [string]$Server = "root@example.com",
+    [string]$Server = "root@43.108.37.203",
     [string]$RemoteDir = "/opt/chatbot-qq"
 )
 

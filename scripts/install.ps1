@@ -137,8 +137,8 @@ type = "codex"
 [projects.agent.options]
 work_dir = "$groupWorkspaceToml"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"
@@ -166,8 +166,8 @@ type = "codex"
 [projects.agent.options]
 work_dir = "$privateWorkspaceToml"
 mode = "full-auto"
-model = "gpt-5.4"
-reasoning_effort = "high"
+model = "gpt-5.5"
+reasoning_effort = "medium"
 
 [[projects.platforms]]
 type = "qq"
@@ -194,7 +194,7 @@ if (!$NoNpmInstall) {
 Write-Host ""
 Write-Host "Wrote config: $ConfigPath" -ForegroundColor Green
 Write-Host "Group workspace: $groupWorkspace"
-Write-Host "Set NapCat OneBot v11 upstream to ws://127.0.0.1:3001."
+Write-Host "Set NapCat OneBot v11 upstream to ws://127.0.0.1:13001 on Windows helper installs."
 Write-Host "Run proxy in another terminal:"
 Write-Host "  `$env:ONEBOT_ALLOWED_GROUPS='$GroupId'; `$env:ONEBOT_PROXY_PORTS='$ListenPort,$AtPort'; node scripts\onebot-group-proxy.js"
 Write-Host "Then start cc-connect:"

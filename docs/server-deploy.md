@@ -49,7 +49,7 @@ Ports:
 - private user `200000002` proxy: `127.0.0.1:3007`
 - private user `200000003` proxy: `127.0.0.1:3008`
 - private user `200000004` proxy: `127.0.0.1:3009`
-- OneBot proxy health check: `127.0.0.1:3010/healthz`
+- OneBot proxy health check: `127.0.0.1:13110/healthz`
 
 ## OpenClaw Shared Index Commands
 
@@ -133,7 +133,7 @@ ONEBOT_ALLOWED_PRIVATE_USERS=200000001,200000002,200000003,200000004
 ONEBOT_UPSTREAM_URL=ws://127.0.0.1:3001
 ONEBOT_PROXY_PORTS=3002,3003,3005,3006,3007,3008,3009
 ONEBOT_HEALTH_HOST=127.0.0.1
-ONEBOT_HEALTH_PORT=3010
+ONEBOT_HEALTH_PORT=13110
 ONEBOT_OUTGOING_RETRY_MAX=2
 ONEBOT_OUTGOING_RESPONSE_TIMEOUT_MS=12000
 ONEBOT_OUTGOING_RETRY_BASE_DELAY_MS=1200
@@ -308,6 +308,30 @@ Dry-run restore test, without touching live `/opt/chatbot-qq`:
 .\scripts\test-restore-chatbot-qq-backup.ps1 -Archive C:\chatbot-qq\backup\server-daily\chatbot-qq-server-YYYYMMDD-HHMMSS.tar.gz
 ```
 
+Full server migration backup, including QQ, Feishu/OpenClaw, data, systemd units,
+dependency inventory, local auth state, and secrets:
+
+```powershell
+cd C:\chatbot-qq
+.\scripts\backup-server-migration.ps1
+```
+
+The migration archive is written under `backup\server-migration\` and is ignored
+by git. It may contain API keys, cookies, QQ/NapCat login state, Feishu config,
+chat workspaces, and Codex auth. Keep it offline or encrypted and never commit it.
+
+Before deleting anything from the old server, run cleanup dry-run against the
+verified archive and SHA256:
+
+```powershell
+.\scripts\cleanup-old-server-after-migration.ps1 `
+  -BackupArchive C:\chatbot-qq\backup\server-migration\chatbot-qq-full-migration-YYYYMMDD-HHMMSS.tar.gz `
+  -ExpectedSha256 SHA256_FROM_MANIFEST
+```
+
+Only after the new server is restored and verified, add `-ConfirmCleanup`.
+Use `-KeepFeishu` or `-KeepRootCodex` if the old server should keep those parts.
+
 Check that Feishu stayed active and QQ ports are isolated:
 
 ```powershell
@@ -344,7 +368,7 @@ Then use `cc-connect-qq.service`.
 - Do not set `data_dir = "/root/.cc-connect"` for QQ.
 - Do not deploy `tools/NapCat.Shell.Windows.OneKey` to Linux.
 - Keep OneBot ports `3001` through `3009` unique.
-- Keep health port `3010` local-only.
+- Keep health port `13110` local-only.
 - Keep QQ group workspaces under `/opt/chatbot-qq/groups`, not `/opt/openclaw`.
 - Keep QQ private workspaces under `/opt/chatbot-qq/users`, not in group folders.
 - Keep secrets in `/etc/chatbot-qq.env` or ignored local config files.

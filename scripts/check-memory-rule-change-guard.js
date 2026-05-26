@@ -86,13 +86,13 @@ function runScenario(scenario) {
   try {
     const candidates = memoryCandidatesFromSamples(scenario.samples, { limit: 10 });
     assert.deepStrictEqual(candidates.map((item) => item.kind), scenario.expectedKinds, `${scenario.name} candidate kinds`);
-    savePendingCandidates({ workspace, scope: "group", scopeID: "9876500001", candidates });
+    savePendingCandidates({ workspace, scope: "group", scopeID: "123456789", candidates });
     for (const item of scenario.pendingItems || []) {
       appendPendingCandidate(workspace, item);
     }
     const triage = pendingCandidateTriage({ workspace, limit: 10 });
     assert.deepStrictEqual(triage.apply.map((entry) => entry.item.kind), scenario.expectedApplyKinds, `${scenario.name} apply kinds`);
-    const applyResult = applyPendingCandidates({ workspace, selector: "all", appliedBy: "guard", scopeID: "9876500001" });
+    const applyResult = applyPendingCandidates({ workspace, selector: "all", appliedBy: "guard", scopeID: "123456789" });
     assert.strictEqual(applyResult.applied, scenario.expectedMemoryKinds.length, `${scenario.name} applied count`);
     const memories = searchMemories({ workspace, query: "", limit: 10 });
     assert.deepStrictEqual(memories.map((item) => item.kind).sort(), scenario.expectedMemoryKinds.slice().sort(), `${scenario.name} memory kinds`);
@@ -118,7 +118,7 @@ function appendPendingCandidate(workspace, item) {
     id: `guard_${item.kind}_${item.user_id || item.user || "unknown"}`,
     created_at: "2026-05-24T09:00:00.000Z",
     scope: "group",
-    scope_id: "9876500001",
+    scope_id: "123456789",
     subject_id: String(item.user_id || item.user || "unknown"),
     user: String(item.user || item.user_id || "unknown"),
     kind: item.kind || "note",

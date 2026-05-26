@@ -16,7 +16,7 @@ const base = {
   version: 1,
   created_at: "2026-05-24T09:00:00.000Z",
   scope: "group",
-  scope_id: "9876500001",
+  scope_id: "123456789",
   subject_id: "1",
   user: "User",
   applied_at: "",

@@ -18,6 +18,7 @@ function createCapabilitySnapshot(deps) {
     task_model_parser: checkOptionalCommand("QQ_TASK_MODEL_PARSER_COMMAND", process.env.QQ_TASK_MODEL_PARSER_COMMAND),
     task_file_modifier: checkOptionalCommand("QQ_TASK_FILE_MODIFIER_COMMAND", process.env.QQ_TASK_FILE_MODIFIER_COMMAND),
     task_script_generator: checkOptionalCommand("QQ_TASK_SCRIPT_GENERATOR_COMMAND", process.env.QQ_TASK_SCRIPT_GENERATOR_COMMAND),
+    course_ocr: checkCourseOcr(deps),
     pdf_parse: checkNodeRequire("pdf-parse"),
     curl: checkCommand("curl"),
     node: { ok: true, detail: process.version },
@@ -31,6 +32,7 @@ function createCapabilitySnapshot(deps) {
       dream_enabled: Boolean(deps.dreamEnabled),
       image_enabled: Boolean(deps.imageEnabled)
     },
+    plugins: deps.plugins || null,
     checks
   };
 }
@@ -72,10 +74,42 @@ function formatCapabilitySummary(snapshot) {
       line("image_generation", "画图"),
       line("task_agent", "自然任务"),
       line("task_model_parser", "模型解析"),
+      line("course_ocr", "课表OCR"),
       line("rendering", "渲染"),
       line("pdf_parse", "PDF")
-    ].join("，")
+    ].join("，"),
+    ...formatPluginSummary(snapshot.plugins)
   ];
+}
+
+function formatPluginSummary(plugins) {
+  if (!plugins || !Array.isArray(plugins.plugins)) {
+    return [];
+  }
+  const enabled = plugins.plugins.filter((item) => item.enabled).map((item) => item.id);
+  const disabled = plugins.plugins.filter((item) => !item.enabled).map((item) => item.id);
+  return [
+    `插件：启用 ${enabled.length ? enabled.join(",") : "无"}；关闭 ${disabled.length ? disabled.join(",") : "无"}`
+  ];
+}
+
+function checkCourseOcr(deps) {
+  const root = deps.projectRoot || (deps.workspaceRoot ? path.dirname(deps.workspaceRoot) : process.cwd());
+  const bridge = path.join(root, "scripts", "course-ocr-bridge.js");
+  const command = String(process.env.QQ_COURSE_OCR_COMMAND || "").trim();
+  const provider = String(process.env.QQ_COURSE_OCR_PROVIDER_COMMAND || "").trim();
+  if (!command) {
+    return {
+      ok: false,
+      detail: fs.existsSync(bridge)
+        ? `not configured; bridge available at ${path.relative(root, bridge)}`
+        : "not configured",
+    };
+  }
+  return {
+    ok: true,
+    detail: provider ? "OCR hook and provider configured" : "OCR hook configured; provider status unknown",
+  };
 }
 
 function connectedClientCount(deps) {

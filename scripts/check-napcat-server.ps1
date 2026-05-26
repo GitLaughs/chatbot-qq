@@ -1,5 +1,5 @@
 param(
-    [string]$Server = "root@example.com",
+    [string]$Server = "root@43.108.37.203",
     [string]$LocalBackupDir = "C:\chatbot-qq\backup\server-daily",
     [switch]$RawHealth,
     [switch]$IncludeLogs
@@ -52,13 +52,13 @@ systemctl is-active chatbot-qq-integrity-check.timer chatbot-qq-cleanup.timer cc
 
 echo
 echo "== Listen ports =="
-ss -ltnp | grep -E '(:3001|:3002|:3003|:3005|:3006|:3007|:3008|:3009|:3010|:18081)' || true
+ss -ltnp | grep -E '(:3001|:3002|:3003|:3005|:3006|:3007|:3008|:3009|:13110|:18081)' || true
 
 echo
 echo "== OneBot proxy health =="
 health_file="$(mktemp /tmp/chatbot-qq-health.XXXXXX.json)"
 trap 'rm -f "$health_file"' EXIT
-if curl -fsS http://127.0.0.1:3010/healthz >"$health_file" 2>/dev/null; then
+if curl -fsS http://127.0.0.1:13110/healthz >"$health_file" 2>/dev/null; then
   if [ "$RAW_HEALTH" = "1" ]; then
     cat "$health_file"
     echo

@@ -62,6 +62,9 @@ function expectedClientPorts(deps) {
   for (const route of deps.privateRoutes.values()) {
     ports.add(route.port);
   }
+  for (const port of deps.extraRequiredPorts || []) {
+    ports.add(port);
+  }
   return [...ports].filter(Boolean).sort((a, b) => a - b);
 }
 

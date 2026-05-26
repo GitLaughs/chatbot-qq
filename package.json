@@ -1,16 +1,19 @@
 {
   "name": "chatbot-qq",
-  "version": "0.2.19",
+  "version": "0.2.22",
   "private": true,
   "type": "commonjs",
   "scripts": {
     "onebot-proxy": "node scripts/onebot-group-proxy.js",
+    "create:plugin": "node scripts/create-plugin.js",
+    "test:plugins": "node scripts/test-plugin-manager.js && node scripts/test-plugins.js",
+    "plugin:check": "node scripts/test-plugin-manager.js && node scripts/test-plugins.js && node scripts/audit-private-data.js --scope Publish",
     "explain:audit-paths": "node scripts/check-private-data-explain-canaries.js --table",
     "explain:audit-paths:json": "node scripts/check-private-data-explain-canaries.js --json",
     "explain:publish-paths": "node scripts/check-private-data-explain-canaries.js --table",
     "explain:route-scope": "node scripts/explain-route-scope.js",
     "monitor:opentoken-subscriptions": "node scripts/monitor-opentoken-subscriptions.js",
-    "test": "node scripts/test-onebot-proxy-units.js && node scripts/test-private-data-audit.js && node scripts/check-private-data-explain-canaries.js && node scripts/check-route-scope-canaries.js && node scripts/check-memory-rule-canaries.js && node scripts/check-pending-memory-lifecycle-canaries.js && node scripts/check-pending-memory-classification-matrix.js && node scripts/check-memory-rule-change-guard.js && node scripts/check-low-restriction-command-canaries.js && node scripts/check-review-packet-canaries.js && node scripts/check-review-packet-source-isolation-canaries.js && node scripts/check-review-packet-actionable-canaries.js && node scripts/check-review-packet-focus-canaries.js && node scripts/check-review-packet-fallback-safety-canaries.js && node scripts/check-review-packet-real-phrase-canaries.js && node scripts/check-opentoken-subscription-monitor-canaries.js && node scripts/canary-task-model-parser-bridge.js && node scripts/canary-artifact-model-bridge.js && node scripts/canary-deploy-command.js && node scripts/audit-private-data.js --scope Publish",
+    "test": "node scripts/test-plugin-manager.js && node scripts/test-plugins.js && node scripts/test-onebot-proxy-units.js && node scripts/test-private-data-audit.js && node scripts/check-private-data-explain-canaries.js && node scripts/check-route-scope-canaries.js && node scripts/check-memory-rule-canaries.js && node scripts/check-memory-ranking-canaries.js && node scripts/check-memory-inject-canaries.js && node scripts/check-memory-compact-canaries.js && node scripts/check-memory-relation-canaries.js && node scripts/check-memory-tidy-canaries.js && node scripts/check-pending-memory-lifecycle-canaries.js && node scripts/check-pending-memory-classification-matrix.js && node scripts/check-memory-rule-change-guard.js && node scripts/check-low-restriction-command-canaries.js && node scripts/check-review-packet-canaries.js && node scripts/check-review-packet-source-isolation-canaries.js && node scripts/check-review-packet-actionable-canaries.js && node scripts/check-review-packet-focus-canaries.js && node scripts/check-review-packet-fallback-safety-canaries.js && node scripts/check-review-packet-real-phrase-canaries.js && node scripts/check-opentoken-subscription-monitor-canaries.js && node scripts/canary-task-model-parser-bridge.js && node scripts/canary-artifact-model-bridge.js && node scripts/canary-deploy-command.js && node scripts/audit-private-data.js --scope Publish",
     "check:deploy-readiness": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-deploy-readiness.ps1",
     "deploy:check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-deploy-readiness.ps1"
   },

@@ -1,5 +1,5 @@
 param(
-    [string]$Server = "root@example.com",
+    [string]$Server = "root@43.108.37.203",
     [string]$LocalBackupDir = "C:\chatbot-qq\backup\server-daily",
     [string]$OutputDir = "C:\chatbot-qq\backup\health-reports",
     [string]$AlertDir = "C:\chatbot-qq\backup\health-alerts",
@@ -239,7 +239,7 @@ foreach ($name in $serviceNames) {
     }
 }
 
-$healthRaw = Invoke-RemoteText "curl -fsS http://127.0.0.1:3010/healthz"
+$healthRaw = Invoke-RemoteText "curl -fsS http://127.0.0.1:13110/healthz"
 try {
     $health = $healthRaw | ConvertFrom-Json
     $report.proxy.health = $health
@@ -252,7 +252,7 @@ try {
     $failures.Add("proxy healthz parse failed") | Out-Null
 }
 
-$metricsRaw = Invoke-RemoteText "curl -fsS http://127.0.0.1:3010/metrics | head -80"
+$metricsRaw = Invoke-RemoteText "curl -fsS http://127.0.0.1:13110/metrics | head -80"
 $report.proxy.metrics_preview = @($metricsRaw -split "`n" | Where-Object { $_ })
 if ($metricsRaw -notmatch "chatbot_qq_up 1") {
     $failures.Add("metrics missing chatbot_qq_up 1") | Out-Null

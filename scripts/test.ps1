@@ -156,6 +156,14 @@ node --check scripts/lib/rota-scheduler.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: rota-scheduler.js" }
 node --check scripts/audit-private-data.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: audit-private-data.js" }
+node --check scripts/create-plugin.js
+if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: create-plugin.js" }
+node --check scripts/test-plugin-manager.js
+if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: test-plugin-manager.js" }
+node --check scripts/test-plugins.js
+if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: test-plugins.js" }
+node --check scripts/lib/plugin-manager.js
+if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: plugin-manager.js" }
 node --check scripts/monitor-opentoken-subscriptions.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: monitor-opentoken-subscriptions.js" }
 node --check scripts/check-private-data-explain-canaries.js
@@ -192,6 +200,12 @@ node --check scripts/test-onebot-proxy-units.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: test-onebot-proxy-units.js" }
 node --check scripts/test-private-data-audit.js
 if ($LASTEXITCODE -ne 0) { throw "node syntax check failed: test-private-data-audit.js" }
+
+Step "Plugin platform checks"
+node scripts/test-plugin-manager.js
+if ($LASTEXITCODE -ne 0) { throw "plugin manager checks failed" }
+node scripts/test-plugins.js
+if ($LASTEXITCODE -ne 0) { throw "plugin platform checks failed" }
 
 Step "OneBot proxy unit checks"
 node scripts/test-onebot-proxy-units.js
@@ -309,15 +323,15 @@ try {
   New-Item -ItemType Directory -Force -Path $defaultRulesRoot | Out-Null
   try {
     $defaultVisibleFiles = @(
-      "groups/sandbox-9876500001/AGENTS.md",
-      "groups/sandbox-9876500001/README.md",
-      "groups/sandbox-9876500001/scripts/tool.js"
+      "groups/sandbox-123456789/AGENTS.md",
+      "groups/sandbox-123456789/README.md",
+      "groups/sandbox-123456789/scripts/tool.js"
     )
     $defaultExcludedFiles = @(
-      ("users/" + "1234500001/README.md"),
-      ("groups/sandbox-9876500001/" + "memory/" + "cha" + "t-2026-05-24.jsonl"),
-      "groups/sandbox-9876500001/local_files/upload.txt",
-      "groups/sandbox-9876500001/files/upload.txt"
+      ("users/" + "100000001/README.md"),
+      ("groups/sandbox-123456789/" + "memory/" + "cha" + "t-2026-05-24.jsonl"),
+      "groups/sandbox-123456789/local_files/upload.txt",
+      "groups/sandbox-123456789/files/upload.txt"
     )
     $defaultTokenLine = ("access_" + "token = abcdefghijklmnop")
     foreach ($relative in @($defaultVisibleFiles + $defaultExcludedFiles)) {

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 systemctl is-active --quiet cc-connect-qq.service
-curl -fsS http://127.0.0.1:3010/healthz >/tmp/chatbot-qq-task-health.json
+curl -fsS http://127.0.0.1:13110/healthz >/tmp/chatbot-qq-task-health.json
 node - <<'NODE'
 const fs = require("fs");
 const health = JSON.parse(fs.readFileSync("/tmp/chatbot-qq-task-health.json", "utf8"));

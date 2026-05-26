@@ -52,8 +52,10 @@ async function testFileModifierResponsesMode() {
   assert.strictEqual(seen.options.headers.Authorization, "Bearer artifact-test-key");
   assert.strictEqual(seen.body.model, "gpt-5.4");
   assert.strictEqual(seen.body.max_output_tokens, 2048);
+  assert.match(seen.body.input[0].content, /outside the current chat workspace/);
   assert.match(seen.body.input[1].content, /完整修改后的文件内容/);
   assert.match(seen.body.input[1].content, /local_files\/archive\/demo\.py/);
+  assert.match(seen.body.input[1].content, /不要删除、移动、覆盖、改权限或修改当前聊天 workspace 外的任何文件/);
 }
 
 async function testScriptGeneratorChatMode() {
@@ -91,8 +93,10 @@ async function testScriptGeneratorChatMode() {
     assert.deepStrictEqual(bridge.normalizeArtifactOutput(request, text), { code: "print('ok')\n" });
   });
   assert.strictEqual(seen.url, "https://artifact.example/v1/chat/completions");
+  assert.match(seen.body.messages[0].content, /Never generate code or file content/);
   assert.match(seen.body.messages[1].content, /完整脚本内容/);
   assert.match(seen.body.messages[1].content, /dry_run/);
+  assert.match(seen.body.messages[1].content, /脚本不得删除、移动、覆盖、改权限或修改当前聊天 workspace 外的任何文件/);
 }
 
 async function main() {

@@ -39,7 +39,7 @@ In NapCat WebUI:
 3. Use:
 
 ```text
-ws://127.0.0.1:3001
+ws://127.0.0.1:13001
 ```
 
 If you set an access token in NapCat, put the same value in `configs\cc-connect.napcat.local.toml`.
@@ -60,6 +60,7 @@ Health check:
 
 ## 4. Security
 
-- Current cc-connect config is limited to QQ group `9876500001`.
-- Do not commit QQ numbers, group IDs, cookies, tokens, or NapCat local config.
+- Current cc-connect config is limited to QQ group `123456789`.
+- QQ numbers and group IDs are routing metadata, but generated configs that contain them stay local.
+- Do not commit cookies, tokens, private logs, chat exports, memory files, or NapCat local config.
 - Keep this route separate from the official QQ Bot fallback.

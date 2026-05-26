@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { classifyMemory, memoryFingerprint, normalizeMemoryText, tagMemory } = require("./memory-rules");
+const { classifyMemory, memoryFingerprint, normalizeMemoryText, tagMemory, importanceScore, relevanceScore } = require("./memory-rules");
 const { looksSensitive: sharedLooksSensitive, redactSecrets } = require("./sensitive-redaction");
 const { appendJSONObject, readJSONLShards } = require("./jsonl-shards");
 
@@ -17,6 +17,10 @@ function memoryFile(workspace) {
 
 function deleteFile(workspace) {
   return path.join(workspace, "memory", "memory-deletes.jsonl");
+}
+
+function memoryAccessFile(workspace) {
+  return path.join(workspace, "memory", "memory-access.jsonl");
 }
 
 function pendingCandidateFile(workspace) {
@@ -57,6 +61,8 @@ function addMemory({ workspace, scope, scopeID = "", subject, text, kind = "note
     source_message_id: String(sourceMessageID || ""),
     tags: [...new Set([...(Array.isArray(tags) ? tags : []), ...tagMemory(clean)].map(String).filter(Boolean))],
     fingerprint,
+    access_count: 0,
+    last_accessed_at: null,
     deleted: false
   };
   ensureDir(path.dirname(memoryFile(workspace)));
@@ -75,6 +81,165 @@ function searchMemories({ workspace, query = "", subject = "", scope = "", limit
     .filter((item) => !wantedScope || String(item.scope) === wantedScope)
     .filter((item) => !q || memoryHaystack(item).includes(q));
   return rows.slice(-Math.max(1, limit)).reverse();
+}
+
+function recencyScore(createdAt, now) {
+  const ageHours = (Number(now || Date.now()) - new Date(createdAt).getTime()) / 3600000;
+  if (!Number.isFinite(ageHours) || ageHours < 0) return 1;
+  const halfLifeHours = Number(process.env.CHATBOT_QQ_MEMORY_RECENCY_HALF_LIFE || 72);
+  return Math.pow(0.5, ageHours / Math.max(1, halfLifeHours));
+}
+
+function effectiveScore(memory, now, accessStats) {
+  const base = importanceScore(memory);
+  const recency = recencyScore(memory && memory.created_at, now || Date.now());
+  const stat = accessStats && accessStats.get ? accessStats.get(memory && memory.id) : null;
+  const accessCount = Number((stat && stat.access_count) || (memory && memory.access_count) || 0);
+  const accessBoost = accessCount ? Math.log2(accessCount + 1) * 0.5 : 0;
+  return (base + accessBoost) * recency;
+}
+
+function searchMemoriesRanked({ workspace, query = "", subject = "", scope = "", limit = 10 }) {
+  const now = Date.now();
+  const wantedSubject = String(subject || "");
+  const wantedScope = String(scope || "");
+  const q = String(query || "").trim().toLowerCase();
+  const deleted = deletedIDs(workspace);
+  const rows = readJSONLines(memoryFile(workspace))
+    .filter((item) => item && !item.deleted && !deleted.has(item.id))
+    .filter((item) => !wantedSubject || String(item.subject) === wantedSubject)
+    .filter((item) => !wantedScope || String(item.scope) === wantedScope);
+
+  const scored = rows.map((item) => {
+    const recency = recencyScore(item.created_at, now);
+    const importance = importanceScore(item);
+    const relevance = relevanceScore(item, q);
+    return {
+      ...item,
+      _score: { recency, importance, relevance, total: recency * importance * relevance }
+    };
+  });
+
+  const result = scored
+    .filter((item) => !q || item._score.relevance > 0)
+    .sort((a, b) => b._score.total - a._score.total)
+    .slice(0, Math.max(1, Number(limit) || 10));
+
+  for (const item of result) {
+    recordMemoryAccess(workspace, item.id);
+  }
+
+  return result;
+}
+
+function formatRankedMemories(items) {
+  if (!items || items.length === 0) {
+    return "没找到结构化记忆。";
+  }
+  return [
+    "结构化记忆（按相关度排序）：",
+    ...items.map((item) => {
+      const score = item._score ? ` [R:${item._score.recency.toFixed(2)} I:${item._score.importance} Rel:${item._score.relevance.toFixed(1)}]` : "";
+      return `- [${item.kind || "note"}] ${item.text} (${item.scope || "?"}:${item.subject || item.subject_id || "?"}, ${shortTime(item.created_at || item.time)})${score}`;
+    })
+  ].join("\n").slice(0, 1600);
+}
+
+function recordMemoryAccess(workspace, memoryIDValue) {
+  if (!workspace || !memoryIDValue) return;
+  ensureDir(path.dirname(memoryAccessFile(workspace)));
+  appendJSONObject(memoryAccessFile(workspace), {
+    version: 1,
+    time: new Date().toISOString(),
+    id: String(memoryIDValue)
+  });
+}
+
+function readMemoryAccessStats(workspace) {
+  const stats = new Map();
+  for (const row of readJSONLines(memoryAccessFile(workspace))) {
+    const id = String((row && row.id) || "");
+    if (!id) continue;
+    const current = stats.get(id) || { access_count: 0, last_accessed_at: "" };
+    current.access_count += 1;
+    current.last_accessed_at = String(row.time || current.last_accessed_at || "");
+    stats.set(id, current);
+  }
+  return stats;
+}
+
+function relationScore(a, b) {
+  if (!a || !b || a.id === b.id) return 0;
+  let score = 0;
+  if (a.subject_id && b.subject_id && a.subject_id === b.subject_id) score += 3;
+  const commonTags = (a.tags || []).filter((t) => (b.tags || []).includes(t));
+  score += commonTags.length * 2;
+  if (a.kind === b.kind && a.kind !== "note") score += 1;
+  if (a.scope === b.scope && a.scope_id === b.scope_id) score += 1;
+  const timeDiff = Math.abs(new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  if (Number.isFinite(timeDiff) && timeDiff < 600000) score += 2;
+  return score;
+}
+
+function relatedMemoriesFor({ workspace, memory, limit = 3 }) {
+  return readActiveMemories(workspace)
+    .map((item) => ({ item, score: relationScore(memory, item) }))
+    .filter((entry) => entry.score >= 4)
+    .sort((a, b) => b.score - a.score || importanceScore(b.item) - importanceScore(a.item))
+    .slice(0, Math.max(1, Number(limit) || 3))
+    .map((entry) => entry.item);
+}
+
+function expandRelatedMemories({ workspace, memory, limit = 3 }) {
+  return relatedMemoriesFor({ workspace, memory, limit });
+}
+
+function readActiveMemories(workspace) {
+  const deleted = deletedIDs(workspace);
+  return readJSONLines(memoryFile(workspace))
+    .filter((item) => item && !item.deleted && !deleted.has(item.id));
+}
+
+function addGlobalMemory({ text, kind = "note", tags = [], subject = "" }) {
+  const globalDir = path.join(process.env.CHATBOT_QQ_WORKSPACE_ROOT || "groups", "_global", "memory");
+  ensureDir(globalDir);
+  const clean = normalizeMemoryText(text);
+  if (!clean) return null;
+  const inferredKind = VALID_KINDS.has(kind) && kind !== "note" ? kind : classifyMemory(clean);
+  const item = {
+    version: 1,
+    id: memoryID(),
+    created_at: new Date().toISOString(),
+    scope: "global",
+    scope_id: "global",
+    subject_type: "global",
+    subject_id: String(subject || ""),
+    subject: String(subject || ""),
+    kind: inferredKind,
+    text: clean,
+    source: { type: "explicit", platform: "qq" },
+    confidence: 1,
+    tags: [...new Set([...(Array.isArray(tags) ? tags : []), ...tagMemory(clean)].map(String).filter(Boolean))],
+    fingerprint: memoryFingerprint({ scope: "global", scopeID: "global", subject, text: clean }),
+    access_count: 0,
+    last_accessed_at: null,
+    deleted: false
+  };
+  appendJSONObject(path.join(globalDir, "global-knowledge.jsonl"), item);
+  return item;
+}
+
+function searchGlobalMemories({ query = "", limit = 3 }) {
+  const globalDir = path.join(process.env.CHATBOT_QQ_WORKSPACE_ROOT || "groups", "_global", "memory");
+  const file = path.join(globalDir, "global-knowledge.jsonl");
+  if (!fs.existsSync(file)) return [];
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return [];
+  return readJSONLines(file)
+    .filter((item) => item && !item.deleted)
+    .filter((item) => memoryHaystack(item).includes(q) || relevanceScore(item, q) > 0)
+    .sort((a, b) => relevanceScore(b, q) - relevanceScore(a, q))
+    .slice(0, Math.max(1, Number(limit) || 3));
 }
 
 function searchMemoryEvidence({ workspace, query = "", subject = "", scope = "", limit = 8 }) {
@@ -998,10 +1163,14 @@ function shortTime(value) {
 
 module.exports = {
   addMemory,
+  addGlobalMemory,
   searchMemories,
+  searchMemoriesRanked,
+  searchGlobalMemories,
   searchMemoryEvidence,
   softDeleteMemories,
   formatMemories,
+  formatRankedMemories,
   formatRecentMemories,
   formatMemoryEvidence,
   memoryStats,
@@ -1031,6 +1200,12 @@ module.exports = {
   pendingCandidateStats,
   formatPendingCandidateStats,
   inferKind,
+  recencyScore,
+  effectiveScore,
+  recordMemoryAccess,
+  readMemoryAccessStats,
+  expandRelatedMemories,
+  relationScore,
   canApplyPendingCandidate,
   pendingCandidateApplyBlockers,
   pendingCandidateFlags
