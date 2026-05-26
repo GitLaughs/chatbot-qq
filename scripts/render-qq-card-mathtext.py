@@ -178,8 +178,9 @@ def inline_segments(line, font):
             img = render_math(chunk.strip(), size=23, display=False)
             parts.append({"type": "math", "image": img, "width": img.width, "height": img.height})
         else:
-            w, h = text_size(chunk, font)
-            parts.append({"type": "text", "text": chunk, "width": w, "height": max(32, h)})
+            text = latex_symbols_to_plain(chunk)
+            w, h = text_size(text, font)
+            parts.append({"type": "text", "text": text, "width": w, "height": max(32, h)})
     return merge_text(parts)
 
 
@@ -216,12 +217,16 @@ def is_formula_line(line):
     s = line.strip()
     if not s or re.search(r"[\u4e00-\u9fff]", s):
         return False
+    if re.match(r"^\d+[.)]\s+.+[:：]\s*$", s):
+        return False
     return bool(re.search(r"(\\[A-Za-z]+|[_^]=?|[∑√∫≤≥≈≠∞]|[A-Za-z]\s*[=<>]|[=<>]\s*[A-Za-z0-9]|\\frac)", s))
 
 
 def is_math_chunk(chunk):
     s = chunk.strip()
     if len(s) < 2:
+        return False
+    if re.match(r"^\d+[.)]\s+", s):
         return False
     if not re.search(r"(\\[A-Za-z]+|[_^]|[∑√∫≤≥≈≠∞]|[A-Za-z0-9]\s*[=<>]|[=<>]\s*[A-Za-z0-9])", s):
         return False
@@ -253,13 +258,35 @@ def normalize_tex(tex):
     s = re.sub(r"^\\\(|\\\)$", "", s)
     s = re.sub(r"^\\\[|\\\]$", "", s)
     s = s.strip("$").strip()
+    s = s.replace("：", ":")
     s = unwrap_command(s, "boxed")
     s = re.sub(r"\\ge(?![A-Za-z])", r"\\geq", s)
     s = re.sub(r"\\le(?![A-Za-z])", r"\\leq", s)
+    s = re.sub(r"\s*->\s*", r"\\to ", s)
+    s = re.sub(r"\s*→\s*", r"\\to ", s)
     s = re.sub(r"\\frac\s*\{((?:[^{}]|\{[^{}]*\})+)\}\s*([A-Za-z0-9])", r"\\frac{\1}{\2}", s)
     s = re.sub(r"\\frac\s*([A-Za-z0-9])\s*([A-Za-z0-9])", r"\\frac{\1}{\2}", s)
     s = s.replace("≥", r"\geq ").replace("≤", r"\leq ").replace("∞", r"\infty ")
     return s
+
+
+def latex_symbols_to_plain(text):
+    s = str(text or "")
+    replacements = {
+        r"\infty": "∞",
+        r"\to": "→",
+        r"\rightarrow": "→",
+        r"\omega": "ω",
+        r"\Omega": "Ω",
+        r"\alpha": "α",
+        r"\beta": "β",
+        r"\tau": "τ",
+    }
+    for src, dst in replacements.items():
+        s = s.replace(src, dst)
+    s = re.sub(r"\s*->\s*", " → ", s)
+    s = s.replace(r"\ ", " ")
+    return s.replace("：", ":")
 
 
 def unwrap_command(s, name):

@@ -104,6 +104,108 @@ const HELP_ENTRIES = [
   { scope: "group", title: "/dream 或 做梦", detail: "整理群记忆；先生成紧凑证据包，不直接让模型扫原始聊天 JSONL", tags: ["dream", "做梦", "记忆", "群", "证据包", "jsonl"] }
 ];
 
+const HELP_MAIN_TITLES = [
+  "/help [关键词]",
+  "/new",
+  "/概览",
+  "/status",
+  "/记住 内容",
+  "/记忆 关键词",
+  "/任务 [task_id]",
+  "/文件",
+  "/待办",
+  "提醒我 周五23:59 交数电实验报告"
+];
+
+const HELP_SECTIONS = [
+  {
+    key: "任务",
+    aliases: ["任务", "自然语言", "学习", "课表", "提醒", "ddl", "fifo", "学术"],
+    desc: "任务、提醒、课表、学术助手",
+    titles: [
+      "/任务 [task_id]",
+      "提醒我 周五23:59 交数电实验报告",
+      "导入课表截图 / 导入课表：周一 08:00 高数 @A101",
+      "找一下上次 FIFO 仿真",
+      "帮我验算线代矩阵 / 整理实验报告指导",
+      "/提醒 每周日晚上7点 A B C D 分别拖地、厕所、洗手台、轮休",
+      "/待办",
+      "/待办 已完成 [数量]",
+      "/待办 搜索 关键词",
+      "/待办 add 内容",
+      "/待办 done 序号|id",
+      "/待办 候选"
+    ]
+  },
+  {
+    key: "记忆",
+    aliases: ["记忆", "画像", "偏好", "候选", "证据", "记住"],
+    desc: "长期记忆、画像、候选记忆",
+    titles: [
+      "/记住 内容",
+      "/全局记住 内容",
+      "/记忆 关键词",
+      "/证据 关键词",
+      "/画像",
+      "/忘记 关键词",
+      "/总结今天",
+      "/候选记忆 [关键词]",
+      "/处理候选记忆 应用:1,2 跳过:3",
+      "/应用候选记忆 序号|all",
+      "/跳过候选记忆 序号|all"
+    ]
+  },
+  {
+    key: "文件",
+    aliases: ["文件", "归档", "找文件", "图片", "画图", "上传"],
+    desc: "文件索引、归档、图片生成",
+    titles: [
+      "/文件",
+      "/files find 关键词",
+      "/最近文件",
+      "/找文件 关键词",
+      "/画图 prompt"
+    ]
+  },
+  {
+    key: "管理",
+    aliases: ["管理", "群管理", "管理员", "状态", "模式", "队列", "错误", "插件"],
+    desc: "状态、触发模式、管理员和插件",
+    titles: [
+      "/status",
+      "/status index",
+      "/队列",
+      "/模式 selective|mention|all|off",
+      "/安静 30分钟",
+      "/恢复",
+      "/主动 off|low|normal|high",
+      "/连续",
+      "/心情",
+      "/反馈 [最近]",
+      "/最近错误",
+      "/admin",
+      "/dream 或 做梦"
+    ]
+  },
+  {
+    key: "迭代",
+    aliases: ["迭代", "维护", "建议", "提案", "审查", "口径", "自检"],
+    desc: "自迭代、提案、审查包",
+    titles: [
+      "/建议箱",
+      "/建议箱 体检",
+      "/审查包",
+      "/口径巡检"
+    ]
+  },
+  {
+    key: "全部",
+    aliases: ["全部", "所有", "all"],
+    desc: "当前聊天可用的全部命令",
+    all: true
+  }
+];
+
 function createProxyCommands(deps) {
   function commandBody(msg, names) {
     const text = deps.messageText(msg).trim();
@@ -213,6 +315,10 @@ function createProxyCommands(deps) {
   function proxyHelpText(isPrivate, query = "") {
     const visible = HELP_ENTRIES.filter((entry) => entry.scope === "all" || (isPrivate ? entry.scope === "private" : entry.scope === "group"));
     const q = String(query || "").trim().toLowerCase();
+    const section = q ? findHelpSection(q) : null;
+    if (section) {
+      return formatHelpSection(section, visible, isPrivate);
+    }
     const matches = q ? visible.filter((entry) => helpHaystack(entry).includes(q)) : visible;
     if (q && matches.length === 0) {
       return [
@@ -968,49 +1074,37 @@ function createProxyCommands(deps) {
   }
 
   function formatDefaultHelp(visible, isPrivate) {
-    const groups = [
-      {
-        name: "常用",
-        titles: ["/help [关键词]", "/new", "/概览", "/status", "/队列"]
-      },
-      {
-        name: "自然语言任务",
-        titles: ["提醒我 周五23:59 交数电实验报告", "导入课表截图 / 导入课表：周一 08:00 高数 @A101", "找一下上次 FIFO 仿真", "帮我验算线代矩阵 / 整理实验报告指导"]
-      },
-      {
-        name: "记忆和画像",
-        titles: ["/记住 内容", "/记忆 关键词", "/证据 关键词", "/画像"]
-      },
-      {
-        name: "任务和文件",
-        titles: ["/任务 [task_id]", "/待办", "/提醒 每周日晚上7点 A B C D 分别拖地、厕所、洗手台、轮休", "/文件", "/找文件 关键词", "/画图 prompt"]
-      },
-      {
-        name: isPrivate ? "私聊管理" : "群管理",
-        titles: isPrivate
-          ? ["/admin", "/最近错误"]
-          : ["/模式 selective|mention|all|off", "/安静 30分钟", "/恢复", "/主动 off|low|normal|high", "/dream 或 做梦"]
-      },
-      {
-        name: "迭代维护",
-        titles: ["/建议箱", "/候选记忆 [关键词]", "/审查包", "/口径巡检"]
-      }
-    ];
     const byTitle = new Map(visible.map((entry) => [entry.title, entry]));
     const lines = [
       `QQ Bot 帮助（${isPrivate ? "私聊" : "群聊"}）`,
-      "可用入口",
+      "常用入口",
       "━━━━━━━━━━━━"
     ];
-    for (const group of groups) {
-      const entries = group.titles.map((title) => byTitle.get(title)).filter(Boolean);
-      if (!entries.length) continue;
-      lines.push(`[${group.name}]`);
-      lines.push(...entries.map(formatHelpEntry));
+    const common = HELP_MAIN_TITLES.map((title) => byTitle.get(title)).filter(Boolean);
+    lines.push(...common.map(formatCompactHelpEntry));
+    lines.push("━━━━━━━━━━━━");
+    lines.push("更多分类：");
+    for (const section of HELP_SECTIONS) {
+      if (!helpSectionEntries(section, visible).length) continue;
+      const aliases = section.aliases.slice(0, 3).join("/");
+      lines.push(`- /help ${section.key}：${section.desc}（也可搜 ${aliases}）`);
     }
     lines.push("━━━━━━━━━━━━");
-    lines.push("查入口：/help 关键词 或 /命令 关键词；例：/help 课表、/help DDL、/help FIFO");
-    return lines.join("\n").slice(0, 2600);
+    lines.push("例：/help 任务，/help 记忆，/help 文件，/help 管理，/help 迭代，/help 全部");
+    lines.push("关键词搜索仍可用：/help 课表、/help DDL、/help FIFO");
+    return lines.join("\n").slice(0, 1600);
+  }
+
+  function formatHelpSection(section, visible, isPrivate) {
+    const entries = helpSectionEntries(section, visible);
+    return [
+      `帮助：${section.key}（${isPrivate ? "私聊" : "群聊"}）`,
+      section.desc,
+      "━━━━━━━━━━━━",
+      ...entries.map(formatHelpEntry),
+      "━━━━━━━━━━━━",
+      "返回主菜单：/help；关键词搜索：/help 关键词"
+    ].join("\n").slice(0, section.all ? 2600 : 1800);
   }
 
   function formatHelpSearch(query, entries) {
@@ -1025,6 +1119,20 @@ function createProxyCommands(deps) {
 
   function formatHelpEntry(entry) {
     return `${entry.title}\n  ${entry.detail}`;
+  }
+
+  function formatCompactHelpEntry(entry) {
+    return `- ${entry.title}：${entry.detail}`;
+  }
+
+  function findHelpSection(query) {
+    return HELP_SECTIONS.find((section) => section.key.toLowerCase() === query || section.aliases.some((alias) => alias.toLowerCase() === query)) || null;
+  }
+
+  function helpSectionEntries(section, visible) {
+    if (section.all) return visible;
+    const byTitle = new Map(visible.map((entry) => [entry.title, entry]));
+    return (section.titles || []).map((title) => byTitle.get(title)).filter(Boolean);
   }
 
   function sharedFilesCommand(msg, body) {

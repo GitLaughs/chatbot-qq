@@ -7,6 +7,14 @@ versioning once public releases begin.
 
 ## [Unreleased]
 
+### Added
+
+- Added `scripts/install-windows-interactive.ps1` for a guided Windows deployment flow that installs dependencies, writes local config, starts NapCat for QQ QR login, starts onebot-group-proxy and cc-connect, and waits for health readiness.
+
+### Fixed
+
+- Synced the latest proxy fixes for private-message poke acknowledgements, compact reply metadata footers, and formula-heavy QQ image rendering.
+
 ## [0.2.22] - 2026-05-26
 
 ### Added

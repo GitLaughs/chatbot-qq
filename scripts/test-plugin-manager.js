@@ -452,6 +452,7 @@ function testCapabilitySummaryIncludesPlugins() {
 function testProxyUsesPluginConfigForImageCommand() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-proxy-"));
   const config = path.join(temp, "plugins.json");
+  const localConfig = path.join(temp, "plugins.local.json");
   const script = [
     "const assert = require('assert');",
     "const proxy = require('./scripts/onebot-group-proxy');",
@@ -462,7 +463,7 @@ function testProxyUsesPluginConfigForImageCommand() {
     fs.writeFileSync(config, JSON.stringify({ plugins: { image: { enabled: false } } }), "utf8");
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: path.join(__dirname, ".."),
-      env: { ...process.env, ONEBOT_PLUGIN_CONFIG: config },
+      env: { ...process.env, ONEBOT_PLUGIN_CONFIG: config, ONEBOT_PLUGIN_LOCAL_CONFIG: localConfig, ONEBOT_RUNTIME_DIR: path.join(temp, "runtime") },
       encoding: "utf8",
       windowsHide: true,
     });
@@ -475,6 +476,7 @@ function testProxyUsesPluginConfigForImageCommand() {
 function testProxyUsesPluginTriggerOverride() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-proxy-trigger-"));
   const config = path.join(temp, "plugins.json");
+  const localConfig = path.join(temp, "plugins.local.json");
   const script = [
     "const assert = require('assert');",
     "const proxy = require('./scripts/onebot-group-proxy');",
@@ -485,7 +487,7 @@ function testProxyUsesPluginTriggerOverride() {
     fs.writeFileSync(config, JSON.stringify({ plugins: { image: { enabled: true, settings: { triggers: ["/draw"] } } } }), "utf8");
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: path.join(__dirname, ".."),
-      env: { ...process.env, ONEBOT_PLUGIN_CONFIG: config },
+      env: { ...process.env, ONEBOT_PLUGIN_CONFIG: config, ONEBOT_PLUGIN_LOCAL_CONFIG: localConfig, ONEBOT_RUNTIME_DIR: path.join(temp, "runtime") },
       encoding: "utf8",
       windowsHide: true,
     });

@@ -113,6 +113,14 @@ Clone this repository, then run on Windows:
 ```powershell
 git clone https://github.com/GitLaughs/chatbot-qq.git C:\chatbot-qq
 cd C:\chatbot-qq
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows-interactive.ps1
+```
+
+The interactive Windows installer asks for the NapCat QQ account, allowed QQ group, optional private QQ user, and the NapCat folder. It installs npm dependencies when needed, writes local cc-connect config, starts NapCat in a visible terminal for QR login, starts onebot-group-proxy and cc-connect, then waits for `http://127.0.0.1:13110/healthz` to become usable.
+
+Manual setup is still available:
+
+```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -NoStart
 ```
 
@@ -266,7 +274,9 @@ Static commands:
 Background profile updater:
 
 - `chatbot-qq-profile-update.timer` runs every 3 hours on Linux deployments.
+- Windows deployments can run `scripts/run-profile-update-loop.ps1`, which runs every 3 hours after a 15 minute startup delay.
 - It invokes `scripts/update-user-profiles.sh --all` with `gpt-5.5` and medium reasoning.
+- The Windows loop invokes `scripts/update-user-profiles.ps1 -All` with the same model defaults.
 - It silently reads recent group/private `memory/chat-*.jsonl` records and updates only local group/member/private profile files.
 - Workspaces are skipped when no chat record is newer than the latest successful profile update.
 
@@ -299,7 +309,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\get-chatbot-qq
 
 Expected:
 
-- NapCat exposes OneBot v11 on `127.0.0.1:3001`;
+- NapCat exposes OneBot v11 on `127.0.0.1:13001` when using the Windows helper scripts;
 - `onebot-group-proxy` exposes the configured local ports;
 - cc-connect starts with the generated QQ config;
 - allowed group messages reach the group workspace;

@@ -136,7 +136,7 @@ function runCanaries(root) {
     replies,
     name: "group-help-files",
     msg: groupMsg("/help 文件"),
-    mustMatch: [/命令搜索：文件/, /\/文件/, /\/找文件 关键词/],
+    mustMatch: [/帮助：文件/, /\/文件/, /\/找文件 关键词/],
     mustNotMatch: [/\/admin/]
   }));
   rows.push(checkReply({

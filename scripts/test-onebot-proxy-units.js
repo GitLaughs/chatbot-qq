@@ -35,7 +35,7 @@ const { buildEvidencePacket } = require("./lib/evidence-packet");
 const { appendJSONObject, listJSONLShards, readJSONLShards } = require("./lib/jsonl-shards");
 const { evaluateGroupEngagement, evaluatePrivateCheckin, formatPrivateCheckinMessage, formatProactivityStatus, setProactivityLevel, proactivitySnapshot, keywordOverlap, workspaceKeywords, isCommandLikeText, isActionableGroupText, hasEngagementIntent, readOpenTodoItems, safeCheckinItem, resetProactiveState } = require("./lib/proactive-engager");
 const { buildTaskParseRequest, normalizeModelResult, parseTaskWithModel, validateTaskSpec } = require("./task-agent");
-const { shouldRenderAsImage, maybeRenderOutgoingAsImage, outgoingRenderTarget, renderForQQ, enrichMessageForAgent, promptInjectionGuardForMessage, composeEnrichedContext, taskAgentContextForMessage, feedbackContextSignalsForMessage, profileContextsForMessage, groupEnergyContextForMessage, shouldSkipGroupEnergyContext, isExplicitQaRequest, isReplyToKnownBotMessage, messageText, imageSourcesForMessage, normalizeVisualSegments, shouldDispatchListenMessage, shouldSilenceAtOnlyGroupMessage, recentGroupFilesContextForMessage, naturalTaskRouteForMessage, heavyTaskPortForMessage, parseImageCredentials, controlCommandPayload, shouldAdminPokeAck, adminPokePayload, shouldSilenceOutgoing, isChatImageFile, shouldUploadMentionedFiles, collectOutgoingFileUploadCandidates, fileOutboxCandidates, outboxMatchesTarget, rememberActiveTriggerMessage, trackOutgoingAPI, handleBotReplyResponse, updateTaskRequestFromBotReply, enqueueTaskArtifactUploads, taskArtifactOutboxRows, recordTaskArtifactUploadResult, extractTaskArtifactPaths, validateTaskArtifactPath, awaitingNaturalTaskContinuation, taskContinueRequestForMessage, parseTaskContinueCommand, isPdfFileData, isRotaIntent, recentBotReplies, WORKSPACE_ROOT } = require("./onebot-group-proxy");
+const { shouldRenderAsImage, maybeRenderOutgoingAsImage, outgoingRenderTarget, renderForQQ, enrichMessageForAgent, promptInjectionGuardForMessage, composeEnrichedContext, taskAgentContextForMessage, feedbackContextSignalsForMessage, profileContextsForMessage, groupEnergyContextForMessage, shouldSkipGroupEnergyContext, isExplicitQaRequest, isReplyToKnownBotMessage, messageText, imageSourcesForMessage, normalizeVisualSegments, shouldDispatchListenMessage, shouldSilenceAtOnlyGroupMessage, recentGroupFilesContextForMessage, naturalTaskRouteForMessage, heavyTaskPortForMessage, parseImageCredentials, controlCommandPayload, shouldAdminPokeAck, adminPokePayload, shouldPrivatePokeAck, privatePokePayload, shouldSilenceOutgoing, isChatImageFile, shouldUploadMentionedFiles, collectOutgoingFileUploadCandidates, fileOutboxCandidates, outboxMatchesTarget, rememberActiveTriggerMessage, trackOutgoingAPI, handleBotReplyResponse, updateTaskRequestFromBotReply, enqueueTaskArtifactUploads, taskArtifactOutboxRows, recordTaskArtifactUploadResult, extractTaskArtifactPaths, validateTaskArtifactPath, awaitingNaturalTaskContinuation, taskContinueRequestForMessage, parseTaskContinueCommand, isPdfFileData, isRotaIntent, recentBotReplies, WORKSPACE_ROOT } = require("./onebot-group-proxy");
 const { cardMetrics, captionArgForFile, captionArgForText, outputPagePaths, paginateBodyText } = require("./render-qq-card-imagemagick");
 
 function testAtOnlyRequiredPorts() {
@@ -144,6 +144,33 @@ function testAdminPokeAckUsesNapCatPokeAction() {
   assert.match(privatePayload.echo, /^__poke_3_/);
 }
 
+function testPrivatePokeAckUsesNapCatPokeActionForAnyPrivateMessage() {
+  const privateMsg = {
+    post_type: "message",
+    message_type: "private",
+    user_id: 42,
+    message_id: 5,
+    raw_message: "ping"
+  };
+  const groupMsg = {
+    post_type: "message",
+    message_type: "group",
+    group_id: 123456789,
+    user_id: 42,
+    message_id: 6,
+    raw_message: "ping"
+  };
+
+  assert.strictEqual(shouldPrivatePokeAck(privateMsg), true);
+  assert.strictEqual(shouldPrivatePokeAck(groupMsg), false);
+
+  const payload = privatePokePayload(privateMsg);
+  assert.strictEqual(payload.action, "send_poke");
+  assert.deepStrictEqual(payload.params, { user_id: "42" });
+  assert.match(payload.echo, /^__poke_private_5_/);
+  assert.strictEqual(privatePokePayload(groupMsg), null);
+}
+
 function testLatexDisplayDelimitersRenderAsImageAndCleanText() {
   const text = "\\[\n金融/会计/投行就业\n\\]\n\n那上财优势很大。";
   assert.strictEqual(shouldRenderAsImage(text), true);
@@ -165,6 +192,15 @@ function testMarkdownFallsBackToPlainQQText() {
   assert.match(cleaned, /链接 \(https:\/\/example\.com\)/);
   assert.doesNotMatch(cleaned, /[#*`]/);
   assert.match(renderForQQ("保存到 local_files/archive/problem_index.md"), /local_files\/archive\/problem_index\.md/);
+}
+
+function testReplyMetadataFooterIsCompactAndDoesNotForceImageRender() {
+  const text = "普通文本回复。\n\ngpt-5.5 · high · 剩余 69% · …/E:/CHATBOT-QQ";
+  const cleaned = renderForQQ(text);
+  assert.match(cleaned, /普通文本回复。/);
+  assert.match(cleaned, /\n5\.5 69%$/);
+  assert.doesNotMatch(cleaned, /gpt-5\.5|high|剩余|CHATBOT-QQ/);
+  assert.strictEqual(shouldRenderAsImage(cleaned), false);
 }
 
 function testFormulaAndLongRepliesRenderForGroupAndPrivate() {
@@ -332,6 +368,48 @@ function testOutgoingVivadoUploadsOnlyImagesFromReplyText() {
       "local_files/vivado/fifo/run-summary.md",
     ].join("\n"), workspace, temp);
     assert.deepStrictEqual(candidates.map((item) => item.name), ["fifo_wave.png"]);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function testOutgoingArtifactDirectoryListsUploadFiles() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "outgoing-artifact-dir-upload-"));
+  try {
+    const workspace = path.join(temp, "users", "100000002");
+    const dir = path.join(workspace, "local_files", "elevator_ctrl_test");
+    fs.mkdirSync(dir, { recursive: true });
+    for (const file of ["elevator_ctrl.v", "tb_elevator_ctrl.v", "run_vivado_sim.ps1", "实验报告.md", "elevator_ctrl.vcd", "tb_elevator_ctrl.wdb"]) {
+      fs.writeFileSync(path.join(dir, file), file, "utf8");
+    }
+    const candidates = collectOutgoingFileUploadCandidates([
+      "完成。产物已保存：",
+      "local_files/elevator_ctrl_test/",
+      "主要文件：",
+      "• elevator_ctrl.v",
+      "• tb_elevator_ctrl.v",
+      "• run_vivado_sim.ps1",
+      "• 实验报告.md",
+      "• elevator_ctrl.vcd",
+      "• tb_elevator_ctrl.wdb",
+      "请把主要文件发给我",
+    ].join("\n"), workspace, temp);
+    assert.deepStrictEqual(candidates.map((item) => item.name), [
+      "elevator_ctrl.v",
+      "tb_elevator_ctrl.v",
+      "run_vivado_sim.ps1",
+      "实验报告.md",
+      "elevator_ctrl.vcd",
+    ]);
+    const absoluteDir = collectOutgoingFileUploadCandidates([
+      "完成。产物已保存：",
+      `${dir}\\`,
+      "主要文件：",
+      "• elevator_ctrl.v",
+      "• 实验报告.md",
+      "请把主要文件发给我",
+    ].join("\n"), workspace, temp);
+    assert.deepStrictEqual(absoluteDir.map((item) => item.name), ["elevator_ctrl.v", "实验报告.md"]);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
@@ -2095,20 +2173,38 @@ function testHelpIndexFiltersByContextAndKeyword() {
   const groupReplies = [];
   const groupCommands = createProxyCommands(baseCommandDeps({ replies: groupReplies }));
   groupCommands.handleProxyCommand({ message_type: "group", group_id: 234567890, user_id: 1, message_id: 2, raw_message: "/help" });
-  assert.match(groupReplies.at(-1), /可用入口/);
+  assert.match(groupReplies.at(-1), /(?:常用|可用)入口/);
   assert.match(groupReplies.at(-1), /\/new/);
   assert.match(groupReplies.at(-1), /提醒我 周五23:59 交数电实验报告/);
-  assert.match(groupReplies.at(-1), /导入课表截图/);
-  assert.match(groupReplies.at(-1), /找一下上次 FIFO 仿真/);
-  assert.match(groupReplies.at(-1), /帮我验算线代矩阵/);
-  assert.match(groupReplies.at(-1), /\/dream 或 做梦/);
   assert.match(groupReplies.at(-1), /\/任务 \[task_id\]/);
-  assert.match(groupReplies.at(-1), /\/画图 prompt/);
+  assert.match(groupReplies.at(-1), /更多分类/);
+  assert.match(groupReplies.at(-1), /\/help 任务/);
+  assert.match(groupReplies.at(-1), /\/help 记忆/);
+  assert.match(groupReplies.at(-1), /\/help 文件/);
+  assert.match(groupReplies.at(-1), /\/help 管理/);
+  assert.match(groupReplies.at(-1), /\/help 迭代/);
+  assert.doesNotMatch(groupReplies.at(-1), /导入课表截图/);
+  assert.doesNotMatch(groupReplies.at(-1), /找一下上次 FIFO 仿真/);
+  assert.doesNotMatch(groupReplies.at(-1), /帮我验算线代矩阵/);
+  assert.doesNotMatch(groupReplies.at(-1), /\/dream 或 做梦/);
+  assert.doesNotMatch(groupReplies.at(-1), /\/画图 prompt/);
   assert.doesNotMatch(groupReplies.at(-1), /\/admin/);
   assert.match(groupReplies.at(-1), /\/help 课表/);
 
+  groupCommands.handleProxyCommand({ message_type: "group", group_id: 234567890, user_id: 1, message_id: 13, raw_message: "/help 任务" });
+  assert.match(groupReplies.at(-1), /帮助：任务/);
+  assert.match(groupReplies.at(-1), /导入课表截图/);
+  assert.match(groupReplies.at(-1), /找一下上次 FIFO 仿真/);
+  assert.match(groupReplies.at(-1), /帮我验算线代矩阵/);
+
+  groupCommands.handleProxyCommand({ message_type: "group", group_id: 234567890, user_id: 1, message_id: 14, raw_message: "/help 管理" });
+  assert.match(groupReplies.at(-1), /帮助：管理/);
+  assert.match(groupReplies.at(-1), /\/dream 或 做梦/);
+  assert.match(groupReplies.at(-1), /\/模式 selective/);
+  assert.doesNotMatch(groupReplies.at(-1), /\/admin/);
+
   groupCommands.handleProxyCommand({ message_type: "group", group_id: 234567890, user_id: 1, message_id: 11, raw_message: "/help 课表" });
-  assert.match(groupReplies.at(-1), /命令搜索：课表/);
+  assert.match(groupReplies.at(-1), /帮助：任务/);
   assert.match(groupReplies.at(-1), /截图 OCR/);
 
   groupCommands.handleProxyCommand({ message_type: "group", group_id: 234567890, user_id: 1, message_id: 12, raw_message: "/help FIFO" });
@@ -2122,7 +2218,7 @@ function testHelpIndexFiltersByContextAndKeyword() {
   assert.match(groupReplies.at(-1), /\/待办 应用候选/);
 
   groupCommands.handleProxyCommand({ message_type: "group", group_id: 234567890, user_id: 1, message_id: 4, raw_message: "/help 管理员" });
-  assert.match(groupReplies.at(-1), /没有找到相关命令/);
+  assert.match(groupReplies.at(-1), /帮助：管理/);
   assert.doesNotMatch(groupReplies.at(-1), /\/admin/);
 
   groupCommands.handleProxyCommand({ message_type: "group", group_id: 234567890, user_id: 1, message_id: 5, raw_message: "/help dream" });
@@ -2132,10 +2228,12 @@ function testHelpIndexFiltersByContextAndKeyword() {
   const privateReplies = [];
   const privateCommands = createProxyCommands(baseCommandDeps({ replies: privateReplies, adminRootUsers: [100000001], adminUsers: [100000001] }));
   privateCommands.handleProxyCommand({ message_type: "private", user_id: 100000001, message_id: 6, raw_message: "/help" });
-  assert.match(privateReplies.at(-1), /\/admin/);
+  assert.doesNotMatch(privateReplies.at(-1), /\/admin/);
+  assert.match(privateReplies.at(-1), /\/help 管理/);
   assert.doesNotMatch(privateReplies.at(-1), /\/dream 或 做梦/);
 
   privateCommands.handleProxyCommand({ message_type: "private", user_id: 100000001, message_id: 7, raw_message: "/help 管理员" });
+  assert.match(privateReplies.at(-1), /帮助：管理/);
   assert.match(privateReplies.at(-1), /\/admin/);
 
   privateCommands.handleProxyCommand({ message_type: "private", user_id: 100000001, message_id: 8, raw_message: "/help dream" });
@@ -7691,6 +7789,7 @@ testMetricsTextIncludesOperationalCounters();
 testImageCredentialsUseOpenTokenPool();
 testLatexDisplayDelimitersRenderAsImageAndCleanText();
 testMarkdownFallsBackToPlainQQText();
+testReplyMetadataFooterIsCompactAndDoesNotForceImageRender();
 testFormulaAndLongRepliesRenderForGroupAndPrivate();
 testPagedRenderedRepliesSendAllImages();
 testRenderFailureKeepsOriginalOutgoingText();
@@ -7699,12 +7798,14 @@ testPrivatePdfDetectionOnlyMatchesPdfFiles();
 testOutgoingFileUploadCandidatesRequireModifiedLocalFiles();
 testImageArtifactsUseImageMessageTransport();
 testOutgoingVivadoUploadsOnlyImagesFromReplyText();
+testOutgoingArtifactDirectoryListsUploadFiles();
 testFileOutboxCandidatesMatchCurrentChatOnly();
 testNapCatContainerPathMapsToHostDataDir();
 testNormalOutgoingDoesNotRenderImage();
 testSilentReplySentinelIsSuppressedForGroupAndPrivate();
 testOutgoingRenderTargetSupportsSendMsgPrivateFallback();
 testAdminPokeAckUsesNapCatPokeAction();
+testPrivatePokeAckUsesNapCatPokeActionForAnyPrivateMessage();
 testProfileContextPreservesImageSegment();
 testMfaceIsNormalizedToImageWhenUrlExists();
 testQuotedImageIsForwardedWhenUserRepliesToImage();

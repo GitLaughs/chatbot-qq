@@ -846,13 +846,13 @@ function connectUpstream() {
 
     if (isPrivateMessage) {
       const userID = Number(msg.user_id);
+      privatePokeAck(msg);
       const route = routeForPrivateUser(userID);
       if (!route || !ALLOWED_PRIVATE_USERS.includes(userID)) {
         log("drop private", userID, "msg", msg.message_id);
         return;
       }
       recordPrivateMessage(msg);
-      adminPokeAck(msg);
       if (tryHandleTaskContinueCommand(msg)) {
         return;
       }
@@ -1987,6 +1987,34 @@ function adminPokeAck(msg) {
   sendUpstream(payload);
 }
 
+function shouldPrivatePokeAck(msg) {
+  return Boolean(msg &&
+    msg.post_type === "message" &&
+    msg.message_type === "private" &&
+    Number(msg.user_id));
+}
+
+function privatePokePayload(msg) {
+  if (!shouldPrivatePokeAck(msg)) {
+    return null;
+  }
+  return {
+    action: "send_poke",
+    params: {
+      user_id: String(Number(msg.user_id))
+    },
+    echo: `__poke_private_${msg.message_id}_${Date.now()}`
+  };
+}
+
+function privatePokeAck(msg) {
+  const payload = privatePokePayload(msg);
+  if (!payload) {
+    return;
+  }
+  sendUpstream(payload);
+}
+
 function promptInjectionGuardForMessage(msg) {
   if (!msg || msg.post_type !== "message" || !["group", "private"].includes(msg.message_type)) {
     return { action: "allow", reason: "" };
@@ -3091,10 +3119,10 @@ function prepareOutgoing(obj, sourcePort) {
   const originalOutgoingText = outgoingText(copy);
   copy = maybeCreateAtArtifacts(copy, sourcePort);
   maybeUploadOutgoingFiles(copy, sourcePort, [originalOutgoingText, outgoingText(copy)].filter(Boolean).join("\n"));
-  const renderedOutgoingText = outgoingText(copy);
-  const renderCandidateText = originalOutgoingText && originalOutgoingText !== renderedOutgoingText
-    ? `${originalOutgoingText}\n${renderedOutgoingText || ""}`.trim()
-    : (renderedOutgoingText || originalOutgoingText);
+  const artifactOutgoingText = outgoingText(copy);
+  let renderCandidateText = originalOutgoingText && originalOutgoingText !== artifactOutgoingText
+    ? `${originalOutgoingText}\n${artifactOutgoingText || ""}`.trim()
+    : (artifactOutgoingText || originalOutgoingText);
 
   if (typeof copy.params.message === "string") {
     copy.params.message = renderForQQ(stripWorkspacePath(copy.params.message));
@@ -3106,6 +3134,7 @@ function prepareOutgoing(obj, sourcePort) {
       return { ...seg, data: { ...seg.data, text: renderForQQ(stripWorkspacePath(seg.data.text)) } };
     });
   }
+  renderCandidateText = outgoingText(copy) || renderForQQ(stripWorkspacePath(renderCandidateText));
   copy = maybeRenderOutgoingAsImage(copy, renderCandidateText);
   addReplyReference(copy, sourcePort);
   return copy;
@@ -3232,12 +3261,13 @@ function collectOutgoingFileUploadCandidates(text, workspace, projectRoot = path
   }
   const seen = new Set();
   const candidates = [];
-  for (const rawPathToken of extractPathTokens(text)) {
+  const allowNonImageVivado = shouldUploadNonImageArtifacts(text);
+  for (const rawPathToken of expandedOutgoingPathTokens(text, workspace)) {
     const candidate = fileUploadCandidateFromPath(rawPathToken, workspace, projectRoot, "reply-text");
     if (!candidate || seen.has(candidate.path)) {
       continue;
     }
-    if (isVivadoNonImageUploadCandidate(candidate.path, workspace)) {
+    if (isVivadoNonImageUploadCandidate(candidate.path, workspace) && !allowNonImageVivado) {
       log("skip outgoing file upload", "vivado-non-image", candidate.path);
       continue;
     }
@@ -3248,6 +3278,10 @@ function collectOutgoingFileUploadCandidates(text, workspace, projectRoot = path
     }
   }
   return candidates;
+}
+
+function shouldUploadNonImageArtifacts(text) {
+  return /(全部|所有|主要文件|附件|源码|脚本|报告|vcd|wdb|发给|传给|上传|发送)/i.test(String(text || ""));
 }
 
 function isVivadoNonImageUploadCandidate(filePath, workspace) {
@@ -3267,6 +3301,36 @@ function shouldUploadMentionedFiles(text) {
     return false;
   }
   return /(?:[A-Za-z]:\\|\/|local_files[\/\\]|\.cc-connect[\/\\]|groups[\/\\]|users[\/\\])/.test(s);
+}
+
+function expandedOutgoingPathTokens(text, workspace) {
+  const tokens = extractPathTokens(text);
+  const expanded = [...tokens];
+  const seen = new Set(expanded);
+  const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const localDirs = [];
+  for (const token of tokens) {
+    const resolved = resolveOutgoingFilePath(token, workspace);
+    if (!resolved) continue;
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+      localDirs.push(token);
+    } else if (/[\\/]$/.test(token)) {
+      localDirs.push(token);
+    }
+  }
+  for (const rawDir of localDirs) {
+    for (const line of lines) {
+      const names = line.match(/[\p{L}\p{N}_.-]+\.(?:vcd|wdb|sv|vh|sdc|xdc|md|txt|csv|json|log|tcl|ps1|py|js|cir|sp|zip|png|jpe?g|webp|gif|v|m)/giu) || [];
+      for (const name of names) {
+        const combined = `${rawDir.replace(/[\\/]+$/, "")}/${name}`;
+        if (!seen.has(combined)) {
+          seen.add(combined);
+          expanded.push(combined);
+        }
+      }
+    }
+  }
+  return expanded;
 }
 
 function extractPathTokens(text) {
@@ -3439,6 +3503,10 @@ function resolveOutgoingFilePath(rawPath, workspace, projectRoot = path.dirname(
   if (!pathText || /^https?:\/\//i.test(pathText) || pathText.startsWith("//")) {
     return null;
   }
+  const repairedWorkspacePath = repairCollapsedWorkspacePath(pathText, workspace);
+  if (repairedWorkspacePath) {
+    return repairedWorkspacePath;
+  }
   const normalized = pathText.replace(/\//g, path.sep).replace(/\\/g, path.sep);
   const direct = path.isAbsolute(normalized) ? normalized : path.join(workspace, normalized);
   if (path.isAbsolute(normalized)) {
@@ -3454,6 +3522,36 @@ function resolveOutgoingFilePath(rawPath, workspace, projectRoot = path.dirname(
     return path.resolve(projectRoot, normalized);
   }
   return path.resolve(workspace, normalized);
+}
+
+function repairCollapsedWorkspacePath(pathText, workspace) {
+  const raw = String(pathText || "");
+  if (!/^[A-Za-z]:/.test(raw) || /[\\/]/.test(raw)) {
+    return null;
+  }
+  const collapsedWorkspace = path.resolve(workspace).replace(/[\\/]/g, "");
+  if (!raw.toLowerCase().startsWith(collapsedWorkspace.toLowerCase())) {
+    return null;
+  }
+  let rest = raw.slice(collapsedWorkspace.length);
+  const segments = [];
+  if (/^local_files/i.test(rest)) {
+    segments.push("local_files");
+    rest = rest.slice("local_files".length);
+  }
+  if (!segments.length) {
+    return null;
+  }
+  const knownExtensions = [".elevator_ctrl_test", ".local_files"];
+  for (const ext of knownExtensions) {
+    if (rest.toLowerCase().startsWith(ext.toLowerCase())) {
+      rest = rest.slice(ext.length);
+    }
+  }
+  if (rest) {
+    segments.push(rest);
+  }
+  return path.resolve(workspace, ...segments);
 }
 
 function validateOutgoingFilePath(filePath, workspace) {
@@ -3889,7 +3987,7 @@ function stripWorkspacePath(text) {
 }
 
 function renderForQQ(text) {
-  return String(text || "")
+  return compactReplyMetadata(String(text || ""))
     .replace(/\r\n/g, "\n")
     .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, "\n$1\n")
     .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, "$1")
@@ -3910,6 +4008,13 @@ function renderForQQ(text) {
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function compactReplyMetadata(text) {
+  return String(text || "").replace(
+    /(?:^|\n)[ \t]*(?:gpt-)?([0-9]+(?:\.[0-9]+)*(?:-[A-Za-z0-9.]+)?)(?:[ \t]*[·|,，]\s*[^·|,，\n]+)*[ \t]*[·|,，]\s*(?:剩余\s*)?(\d{1,3}%)(?:[ \t]*[·|,，].*)?(?=\n|$)/gi,
+    (_, model, percent) => `\n${model} ${percent}`
+  );
 }
 
 function outgoingGroupID(obj) {
@@ -5433,6 +5538,8 @@ module.exports = {
   controlCommandPayload,
   shouldAdminPokeAck,
   adminPokePayload,
+  shouldPrivatePokeAck,
+  privatePokePayload,
   shouldSilenceOutgoing,
   isChatImageFile,
   shouldUploadMentionedFiles,

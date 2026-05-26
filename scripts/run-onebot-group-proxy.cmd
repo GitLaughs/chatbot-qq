@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul
-cd /d C:\chatbot-qq
+if "%CHATBOT_QQ_ROOT%"=="" set "CHATBOT_QQ_ROOT=%~dp0.."
+cd /d "%CHATBOT_QQ_ROOT%"
 powershell.exe -NoLogo -NoProfile -NonInteractive -Command "if (Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 13110 -State Listen -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >nul 2>nul
 if %ERRORLEVEL%==0 exit /b 0
 set ONEBOT_ALLOWED_GROUPS=123456789,234567890,345678901
@@ -16,8 +17,8 @@ set ONEBOT_PRIVATE_ROUTES=100000002:13006,100000003:13007,100000004:13008,100000
 set ONEBOT_UPSTREAM_URL=ws://127.0.0.1:13001
 set ONEBOT_HEALTH_HOST=127.0.0.1
 set ONEBOT_HEALTH_PORT=13110
-set QQ_COURSE_OCR_COMMAND=["node","C:\\chatbot-qq\\scripts\\course-ocr-bridge.js"]
-set QQ_COURSE_OCR_PROVIDER_COMMAND=["dotnet","run","--project","C:\\chatbot-qq\\scripts\\course-ocr-windows"]
+set QQ_COURSE_OCR_COMMAND=["node","%CHATBOT_QQ_ROOT%\\scripts\\course-ocr-bridge.js"]
+set QQ_COURSE_OCR_PROVIDER_COMMAND=["dotnet","run","--project","%CHATBOT_QQ_ROOT%\\scripts\\course-ocr-windows"]
 set QQ_COURSE_OCR_TIMEOUT_MS=60000
 set QQ_COURSE_OCR_PROVIDER_TIMEOUT_MS=45000
 set ONEBOT_ACK_EMOJI_ID=76
@@ -28,17 +29,17 @@ set ONEBOT_MINIMAL_LISTEN_KEYWORDS=bot,机器人,助手,codex,qqbot,qq bot,写�
 set ONEBOT_GROUP_TRIGGER_KEYWORD_FILE=trigger_keywords.txt
 set ONEBOT_PROFILE_REPLY_MARKERS=触发回复,需要回复,关注点,未解决,重要信息
 set QQ_TASK_TIMEZONE=Asia/Shanghai
-set QQ_TASK_MODEL_PARSER_COMMAND=["node","C:\\chatbot-qq\\scripts\\task-model-parser-bridge.js"]
+set QQ_TASK_MODEL_PARSER_COMMAND=["node","%CHATBOT_QQ_ROOT%\\scripts\\task-model-parser-bridge.js"]
 set QQ_TASK_MODEL_PARSER_MODEL=gpt-5.4
 set QQ_TASK_MODEL_PARSER_MODE=responses
 set QQ_TASK_MODEL_PARSER_TIMEOUT_MS=8000
 set QQ_TASK_MODEL_PARSER_HTTP_TIMEOUT_MS=30000
-set QQ_TASK_FILE_MODIFIER_COMMAND=["node","C:\\chatbot-qq\\scripts\\artifact-model-bridge.js"]
+set QQ_TASK_FILE_MODIFIER_COMMAND=["node","%CHATBOT_QQ_ROOT%\\scripts\\artifact-model-bridge.js"]
 set QQ_TASK_FILE_MODIFIER_TIMEOUT_MS=10000
-set QQ_TASK_SCRIPT_GENERATOR_COMMAND=["node","C:\\chatbot-qq\\scripts\\artifact-model-bridge.js"]
+set QQ_TASK_SCRIPT_GENERATOR_COMMAND=["node","%CHATBOT_QQ_ROOT%\\scripts\\artifact-model-bridge.js"]
 set QQ_TASK_SCRIPT_GENERATOR_TIMEOUT_MS=10000
 set QQ_TASK_ARTIFACT_MODEL=gpt-5.4
 set QQ_TASK_ARTIFACT_MODEL_MODE=responses
 set QQ_TASK_ARTIFACT_MODEL_HTTP_TIMEOUT_MS=60000
 set QQ_TASK_ARTIFACT_MODEL_MAX_OUTPUT_TOKENS=4096
-node "C:\chatbot-qq\scripts\onebot-group-proxy.js" >> "C:\chatbot-qq\onebot-group-proxy.local.out.log" 2>> "C:\chatbot-qq\onebot-group-proxy.local.err.log"
+node "%CHATBOT_QQ_ROOT%\scripts\onebot-group-proxy.js" >> "%CHATBOT_QQ_ROOT%\onebot-group-proxy.local.out.log" 2>> "%CHATBOT_QQ_ROOT%\onebot-group-proxy.local.err.log"

@@ -22,6 +22,14 @@ cc-connect --version
 ```powershell
 git clone https://github.com/GitLaughs/chatbot-qq.git
 cd chatbot-qq
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows-interactive.ps1
+```
+
+交互式一键部署脚本会询问 NapCat 登录 QQ 号、允许的 QQ 群、可选私聊用户和 NapCat 目录；随后安装依赖、生成本机 cc-connect 配置、启动 NapCat 终端并等待扫码登录、启动 OneBot 代理和 cc-connect，最后等待 `http://127.0.0.1:13110/healthz` 可用。
+
+只生成配置、不启动服务时运行：
+
+```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -NoStart
 ```
 
